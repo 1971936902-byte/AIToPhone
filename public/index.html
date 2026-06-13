@@ -14,32 +14,48 @@
   </head>
   <body>
     <main class="app">
+      <aside id="drawer" class="drawer" aria-hidden="true">
+        <div class="drawer-head">
+          <div>
+            <p class="eyebrow">Remote Codex</p>
+            <h2>AIToPhone</h2>
+          </div>
+          <button id="closeDrawerBtn" class="icon-btn" title="关闭">×</button>
+        </div>
+
+        <section class="drawer-section">
+          <label for="tokenInput">访问口令</label>
+          <div class="token-row">
+            <input id="tokenInput" type="password" autocomplete="current-password" placeholder="AUTH_TOKEN" />
+            <button id="saveTokenBtn">保存</button>
+          </div>
+        </section>
+
+        <section class="drawer-section">
+          <div class="section-title">
+            <span>项目和对话</span>
+            <button id="newThreadBtn" class="ghost-btn">新建</button>
+          </div>
+          <select id="projectSelect"></select>
+          <div id="conversationList" class="conversation-list"></div>
+        </section>
+      </aside>
+
+      <div id="scrim" class="scrim"></div>
+
       <header class="topbar">
-        <div>
-          <h1>AIToPhone</h1>
+        <button id="openDrawerBtn" class="icon-btn menu-btn" title="项目和设置">☰</button>
+        <div class="title-block">
+          <h1 id="chatTitle">AIToPhone</h1>
           <p id="statusText">未连接</p>
         </div>
         <button id="limitsBtn" class="icon-btn" title="查看用量">%</button>
       </header>
 
-      <section class="panel setup">
-        <label for="tokenInput">访问口令</label>
-        <div class="token-row">
-          <input id="tokenInput" type="password" autocomplete="current-password" placeholder="AUTH_TOKEN" />
-          <button id="saveTokenBtn">保存</button>
-        </div>
-
-        <label for="projectSelect">项目目录</label>
-        <div class="project-row">
-          <select id="projectSelect"></select>
-          <button id="newThreadBtn">开启</button>
-        </div>
-      </section>
-
       <section id="messages" class="messages" aria-live="polite"></section>
 
       <form id="composer" class="composer">
-        <textarea id="messageInput" rows="2" placeholder="输入给 Codex 的消息"></textarea>
+        <textarea id="messageInput" rows="1" placeholder="输入给 Codex 的消息"></textarea>
         <button id="sendBtn" type="submit">发送</button>
       </form>
 

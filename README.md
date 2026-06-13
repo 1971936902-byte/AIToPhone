@@ -18,6 +18,9 @@ AIToPhone 是一个极简的 iPhone 远程客户端方案：Windows 电脑运行
 - **远程发送指令**：手机输入文本，Windows 本地 Codex 接收并执行。
 - **实时接收输出**：支持 Codex 流式输出，并自动聚合为完整回答气泡。
 - **多项目目录**：通过 `projects.json` 配置项目白名单，手机端可选择不同项目开启对话。
+- **会话同步**：服务端保存项目、对话和消息历史，手机刷新后仍可切换已有对话。
+- **短信式体验**：用户消息靠右，AI 回复靠左，更适合手机阅读。
+- **Markdown 展示**：AI 回复中的段落、列表、行内代码和代码块会被格式化展示。
 - **用量查看**：内置 Codex rate limits / goal token 信息查看入口。
 - **本地优先**：Codex、代码仓库、执行环境都留在 Windows 本机。
 - **网络灵活**：支持蒲公英、Tailscale、EasyTier、ZeroTier、Cloudflare Tunnel 等连接方式。
@@ -169,7 +172,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\show-url.ps1
 ## 项目结构
 
 ```text
-server/                 Windows 本地网关服务
+server/                 Windows 本地网关服务和会话存储逻辑
 public/                 iPhone PWA 前端
 scripts/                Windows 辅助脚本
 projects.json           可远程访问的项目目录白名单
@@ -177,6 +180,8 @@ projects.json           可远程访问的项目目录白名单
 使用说明.md             中文使用说明
 公网访问方案.md         公网访问与隧道方案
 ```
+
+运行时会话历史保存在 `data/conversations.json`，该目录默认不会提交到 GitHub。
 
 ## 项目定位
 

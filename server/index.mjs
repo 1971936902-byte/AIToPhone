@@ -5,6 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer } from "ws";
 import { CodexAppServer } from "./lib/codexAppServer.mjs";
+import { ConversationStore, normalizeCodexEvent } from "./lib/conversationStore.mjs";
 import { getProject, loadProjects, publicProjects } from "./lib/projects.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -15,7 +16,7 @@ const authToken = process.env.AUTH_TOKEN || "change-this-long-random-token";
 const projects = loadProjects();
 const codex = new CodexAppServer();
 const clients = new Set();
-const threads = new Map();
+const store = new ConversationStore(projects);
 
 if (authToken === "change-this-long-random-token") {
   console.warn("Warning: AUTH_TOKEN is still using the example value. Change it before remote use.");
@@ -57,7 +58,18 @@ server.on("upgrade", (req, socket, head) => {
 });
 
 codex.on("notification", (event) => {
-  broadcast({ type: "codex", event });
+  const update = normalizeCodexEvent(event);
+  if (!update) {
+    return;
+  }
+
+  if (update.kind === "turn-complete") {
+    broadcast({ type: "turn-complete", threadId: update.threadId, turnId: update.turnId });
+    return;
+  }
+
+  const message = store.upsertAgentMessage(update);
+  broadcast({ type: "message", threadId: update.threadId, message });
 });
 
 codex.on("status", (status) => {
@@ -77,12 +89,17 @@ async function handleApi(req, res, url) {
   if (req.method === "GET" && url.pathname === "/api/config") {
     return sendJson(res, 200, {
       codex: codex.getStatus(),
-      projects: publicProjects(projects)
+      projects: publicProjects(projects),
+      conversations: store.listConversations()
     });
   }
 
   if (req.method === "GET" && url.pathname === "/api/projects") {
     return sendJson(res, 200, { projects: publicProjects(projects) });
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/conversations") {
+    return sendJson(res, 200, { conversations: store.listConversations() });
   }
 
   if (req.method === "GET" && url.pathname === "/api/status") {
@@ -109,9 +126,19 @@ async function handleApi(req, res, url) {
       cwd: project.cwd,
       createdAt: new Date().toISOString()
     };
-    threads.set(threadId, thread);
+    store.createThread(thread);
     broadcast({ type: "thread", thread });
     return sendJson(res, 200, { thread, result });
+  }
+
+  const threadMatch = url.pathname.match(/^\/api\/threads\/([^/]+)$/);
+  if (req.method === "GET" && threadMatch) {
+    const threadId = decodeURIComponent(threadMatch[1]);
+    const thread = store.getThread(threadId);
+    if (!thread) {
+      return sendJson(res, 404, { error: "Thread not found" });
+    }
+    return sendJson(res, 200, { thread, messages: store.getMessages(threadId) });
   }
 
   const messageMatch = url.pathname.match(/^\/api\/threads\/([^/]+)\/messages$/);
@@ -122,9 +149,14 @@ async function handleApi(req, res, url) {
     if (!text) {
       return sendJson(res, 400, { error: "Message text is required" });
     }
+    if (!store.getThread(threadId)) {
+      return sendJson(res, 404, { error: "Thread not found" });
+    }
 
+    const message = store.addMessage({ threadId, role: "user", text });
+    broadcast({ type: "message", threadId, message });
     const result = await codex.sendMessage({ threadId, text });
-    return sendJson(res, 200, { result });
+    return sendJson(res, 200, { message, result });
   }
 
   const goalMatch = url.pathname.match(/^\/api\/threads\/([^/]+)\/goal$/);
