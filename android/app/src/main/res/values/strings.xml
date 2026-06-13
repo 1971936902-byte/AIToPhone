@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">AIToPhone</string>
+    <string name="title_activity_main">AIToPhone</string>
+    <string name="package_name">com.aitophone.app</string>
+    <string name="custom_url_scheme">com.aitophone.app</string>
+</resources>

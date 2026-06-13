@@ -16,6 +16,7 @@ AIToPhone 是一个极简的 iPhone 远程客户端方案：Windows 电脑运行
 
 - **手机可安装**：iPhone Safari 打开后可添加到主屏幕，像 App 一样使用。
 - **iOS 原生壳**：提供 Capacitor iOS 工程，可在 macOS/Xcode 中构建 IPA 或发布 TestFlight。
+- **Android APK**：提供 Capacitor Android 工程，可用 Android Studio/JDK 构建 APK 安装包。
 - **远程发送指令**：手机输入文本，Windows 本地 Codex 接收并执行。
 - **实时接收输出**：支持 Codex 流式输出，并自动聚合为完整回答气泡。
 - **多项目目录**：通过 `projects.json` 配置项目白名单，手机端可选择不同项目开启对话。
@@ -179,6 +180,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\show-url.ps1
 server/                 Windows 本地网关服务和会话存储逻辑
 public/                 iPhone PWA 前端
 ios/                    Capacitor iOS 原生壳工程
+android/                Capacitor Android APK 工程
 scripts/                Windows 辅助脚本
 projects.json           可远程访问的项目目录白名单
 .env.example            环境变量示例
@@ -205,6 +207,28 @@ powershell -ExecutionPolicy Bypass -File .\scripts\sync-ios.ps1
 ```
 
 真正构建 IPA 需要 macOS + Xcode + Apple 开发者签名。详细步骤见 [iOS安装说明.md](./iOS安装说明.md)。
+
+## Android APK
+
+Android 可以直接安装 APK。本项目已生成 Capacitor Android 工程：
+
+```text
+android/
+```
+
+Windows 上构建 debug APK：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\build-android-apk.ps1
+```
+
+构建成功后 APK 通常位于：
+
+```text
+android\app\build\outputs\apk\debug\app-debug.apk
+```
+
+当前机器需要先安装 Android Studio/JDK 才能编译 APK。详细步骤见 [Android安装说明.md](./Android安装说明.md)。
 
 ## 项目定位
 
