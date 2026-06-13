@@ -9,7 +9,7 @@
     <meta name="theme-color" content="#1f6f78" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/icon.svg" />
-    <link rel="stylesheet" href="/styles.css?v=4" />
+    <link rel="stylesheet" href="/styles.css?v=5" />
     <title>AIToPhone</title>
   </head>
   <body>
@@ -22,6 +22,18 @@
           </div>
           <button id="closeDrawerBtn" class="icon-btn" title="关闭">×</button>
         </div>
+
+        <section class="drawer-section">
+          <div class="account-card">
+            <div class="avatar mini">AI</div>
+            <div>
+              <strong id="accountName">账户未读取</strong>
+              <span id="accountPlan">点击刷新账户信息</span>
+            </div>
+            <button id="refreshAccountBtn" class="ghost-btn">刷新</button>
+          </div>
+          <div id="usageCard" class="usage-card"></div>
+        </section>
 
         <section class="drawer-section">
           <label for="tokenInput">访问口令</label>
@@ -55,7 +67,12 @@
       <section id="messages" class="messages" aria-live="polite"></section>
 
       <form id="composer" class="composer">
+        <button id="attachBtn" class="attach-btn" type="button" title="添加图片或文件">+</button>
+        <input id="fileInput" type="file" multiple hidden />
+        <div class="compose-main">
+          <div id="attachmentTray" class="attachment-tray"></div>
         <textarea id="messageInput" rows="1" placeholder="输入给 Codex 的消息"></textarea>
+        </div>
         <button id="sendBtn" type="submit">发送</button>
       </form>
 
@@ -67,6 +84,6 @@
         <pre id="limitsOutput"></pre>
       </dialog>
     </main>
-    <script src="/app.js?v=4" type="module"></script>
+    <script src="/app.js?v=5" type="module"></script>
   </body>
 </html>

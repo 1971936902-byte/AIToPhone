@@ -88,15 +88,33 @@ export class CodexAppServer extends EventEmitter {
     });
   }
 
-  async sendMessage({ threadId, text }) {
+  async sendMessage({ threadId, text, attachments = [] }) {
+    const input = [{ type: "text", text }];
+    for (const attachment of attachments) {
+      if (attachment.kind === "image") {
+        input.push({
+          type: "localImage",
+          path: attachment.path,
+          detail: "auto"
+        });
+      }
+    }
     return this.request("turn/start", {
       threadId,
-      input: [{ type: "text", text }]
+      input
     });
   }
 
   async readRateLimits() {
     return this.request("account/rateLimits/read", {});
+  }
+
+  async readAccount() {
+    return this.request("account/read", { refreshToken: false });
+  }
+
+  async readUsage() {
+    return this.request("account/usage/read", {});
   }
 
   async getGoal(threadId) {

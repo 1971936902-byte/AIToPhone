@@ -8,12 +8,11 @@ const state = {
   conversations: [],
   threadId: localStorage.getItem("aitophone_thread") || localStorage.getItem("callcodex_thread") || "",
   ws: null,
-  messageNodes: new Map()
+  messageNodes: new Map(),
+  attachments: []
 };
 
-if (state.token) {
-  localStorage.setItem("aitophone_token", state.token);
-}
+if (state.token) localStorage.setItem("aitophone_token", state.token);
 
 const els = {
   statusText: document.querySelector("#statusText"),
@@ -22,6 +21,10 @@ const els = {
   scrim: document.querySelector("#scrim"),
   openDrawerBtn: document.querySelector("#openDrawerBtn"),
   closeDrawerBtn: document.querySelector("#closeDrawerBtn"),
+  accountName: document.querySelector("#accountName"),
+  accountPlan: document.querySelector("#accountPlan"),
+  usageCard: document.querySelector("#usageCard"),
+  refreshAccountBtn: document.querySelector("#refreshAccountBtn"),
   tokenInput: document.querySelector("#tokenInput"),
   saveTokenBtn: document.querySelector("#saveTokenBtn"),
   projectSelect: document.querySelector("#projectSelect"),
@@ -29,6 +32,9 @@ const els = {
   newThreadBtn: document.querySelector("#newThreadBtn"),
   messages: document.querySelector("#messages"),
   composer: document.querySelector("#composer"),
+  attachBtn: document.querySelector("#attachBtn"),
+  fileInput: document.querySelector("#fileInput"),
+  attachmentTray: document.querySelector("#attachmentTray"),
   messageInput: document.querySelector("#messageInput"),
   sendBtn: document.querySelector("#sendBtn"),
   limitsBtn: document.querySelector("#limitsBtn"),
@@ -43,6 +49,7 @@ renderEmpty("打开侧边栏，选择项目后开始对话");
 els.openDrawerBtn.addEventListener("click", openDrawer);
 els.closeDrawerBtn.addEventListener("click", closeDrawer);
 els.scrim.addEventListener("click", closeDrawer);
+els.refreshAccountBtn.addEventListener("click", loadAccount);
 
 els.saveTokenBtn.addEventListener("click", () => {
   state.token = els.tokenInput.value.trim();
@@ -51,19 +58,14 @@ els.saveTokenBtn.addEventListener("click", () => {
   loadConfig();
 });
 
-els.projectSelect.addEventListener("change", () => {
-  renderConversations();
-});
+els.projectSelect.addEventListener("change", renderConversations);
 
 els.newThreadBtn.addEventListener("click", async () => {
   const projectId = els.projectSelect.value;
   if (!projectId) return;
   setBusy(true);
   try {
-    const data = await api("/api/threads", {
-      method: "POST",
-      body: { projectId }
-    });
+    const data = await api("/api/threads", { method: "POST", body: { projectId } });
     await loadConversations();
     await selectThread(data.thread.threadId);
     closeDrawer();
@@ -74,10 +76,19 @@ els.newThreadBtn.addEventListener("click", async () => {
   }
 });
 
+els.attachBtn.addEventListener("click", () => els.fileInput.click());
+els.fileInput.addEventListener("change", async () => {
+  const files = [...els.fileInput.files];
+  els.fileInput.value = "";
+  for (const file of files) {
+    await uploadFile(file);
+  }
+});
+
 els.composer.addEventListener("submit", async (event) => {
   event.preventDefault();
   const text = els.messageInput.value.trim();
-  if (!text) return;
+  if (!text && state.attachments.length === 0) return;
   if (!state.threadId) {
     addSystemMessage("请先在侧边栏选择项目并新建对话。");
     openDrawer();
@@ -85,12 +96,14 @@ els.composer.addEventListener("submit", async (event) => {
   }
 
   els.messageInput.value = "";
+  const attachments = [...state.attachments];
+  clearAttachments();
   autosizeInput();
   setBusy(true);
   try {
     await api(`/api/threads/${encodeURIComponent(state.threadId)}/messages`, {
       method: "POST",
-      body: { text }
+      body: { text, attachments }
     });
   } catch (err) {
     addSystemMessage(err.message);
@@ -104,26 +117,19 @@ els.limitsBtn.addEventListener("click", async () => {
   els.limitsDialog.showModal();
   els.limitsOutput.textContent = "读取中...";
   try {
-    const [limits, goal] = await Promise.all([
-      api("/api/rate-limits"),
-      state.threadId ? api(`/api/threads/${encodeURIComponent(state.threadId)}/goal`) : Promise.resolve(null)
-    ]);
-    els.limitsOutput.textContent = JSON.stringify({ limits: limits.result, goal: goal?.result || null }, null, 2);
+    const account = await api("/api/account");
+    els.limitsOutput.textContent = JSON.stringify(account, null, 2);
   } catch (err) {
     els.limitsOutput.textContent = err.message;
   }
 });
 
-els.closeLimitsBtn.addEventListener("click", () => {
-  els.limitsDialog.close();
-});
+els.closeLimitsBtn.addEventListener("click", () => els.limitsDialog.close());
 
 loadConfig();
 connectEvents();
 
-if ("serviceWorker" in navigator) {
-  navigator.serviceWorker.register("/sw.js").catch(() => {});
-}
+if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});
 
 async function loadConfig() {
   if (!state.token) {
@@ -139,16 +145,54 @@ async function loadConfig() {
     renderProjects();
     renderConversations();
     renderStatus(data.codex);
+    await loadAccount();
 
-    if (state.threadId) {
-      await selectThread(state.threadId, { silent: true });
-    } else {
+    if (state.threadId) await selectThread(state.threadId, { silent: true });
+    else {
       const first = firstThread();
       if (first) await selectThread(first.threadId, { silent: true });
     }
   } catch (err) {
     els.statusText.textContent = err.message;
   }
+}
+
+async function loadAccount() {
+  if (!state.token) return;
+  try {
+    const data = await api("/api/account");
+    renderAccount(data);
+  } catch (err) {
+    els.accountName.textContent = "账户读取失败";
+    els.accountPlan.textContent = err.message;
+  }
+}
+
+function renderAccount(data) {
+  const account = data.account?.account;
+  if (!account) {
+    els.accountName.textContent = data.account?.requiresOpenaiAuth ? "需要登录 Codex" : "账户未知";
+    els.accountPlan.textContent = "未读取到账户信息";
+  } else if (account.type === "chatgpt") {
+    els.accountName.textContent = account.email || "ChatGPT account";
+    els.accountPlan.textContent = `计划：${account.planType || "unknown"}`;
+  } else {
+    els.accountName.textContent = account.type || "Codex account";
+    els.accountPlan.textContent = "已连接";
+  }
+
+  const limits = data.limits?.rateLimits;
+  const primary = limits?.primary;
+  const individual = limits?.individualLimit;
+  const usage = data.usage?.summary;
+  const reset = primary?.resetsAt || individual?.resetsAt;
+  const remaining = individual?.remainingPercent ?? (typeof primary?.usedPercent === "number" ? 100 - primary.usedPercent : null);
+  els.usageCard.innerHTML = `
+    <div><strong>${remaining == null ? "--" : `${remaining}%`}</strong><span>剩余额度</span></div>
+    <div><strong>${primary?.usedPercent ?? "--"}%</strong><span>已用窗口</span></div>
+    <div><strong>${usage?.lifetimeTokens ? compactNumber(usage.lifetimeTokens) : "--"}</strong><span>累计 tokens</span></div>
+    <p>更新：${formatTime(data.updatedAt)}${reset ? ` · 重置：${formatTime(reset * 1000)}` : ""}</p>
+  `;
 }
 
 async function loadConversations() {
@@ -163,36 +207,20 @@ function connectEvents() {
 
   const protocol = location.protocol === "https:" ? "wss:" : "ws:";
   state.ws = new WebSocket(`${protocol}//${location.host}/events?token=${encodeURIComponent(state.token)}`);
-
-  state.ws.addEventListener("open", () => {
-    els.statusText.textContent = "网关已连接";
-  });
-
+  state.ws.addEventListener("open", () => (els.statusText.textContent = "网关已连接"));
   state.ws.addEventListener("message", async (event) => {
     const payload = JSON.parse(event.data);
-    if (payload.type === "status") {
-      renderStatus(payload.status);
-      return;
-    }
-    if (payload.type === "thread") {
-      await loadConversations();
-      return;
-    }
+    if (payload.type === "status") return renderStatus(payload.status);
+    if (payload.type === "thread") return loadConversations();
     if (payload.type === "message") {
       await loadConversations();
-      if (payload.threadId === state.threadId) {
-        upsertMessage(payload.message);
-      }
+      if (payload.threadId === state.threadId) upsertMessage(payload.message);
       return;
     }
-    if (payload.type === "turn-complete" && payload.threadId === state.threadId) {
-      setBusy(false);
-    }
+    if (payload.type === "turn-complete" && payload.threadId === state.threadId) setBusy(false);
+    if (payload.type === "account") renderAccount(payload.account);
   });
-
-  state.ws.addEventListener("close", () => {
-    els.statusText.textContent = "事件连接已断开";
-  });
+  state.ws.addEventListener("close", () => (els.statusText.textContent = "事件连接已断开"));
 }
 
 function renderProjects() {
@@ -206,30 +234,48 @@ function renderProjects() {
 }
 
 function renderConversations() {
-  const projectId = els.projectSelect.value || state.projects[0]?.id;
-  const group = state.conversations.find((item) => item.id === projectId);
-  const threads = group?.threads || [];
-
   els.conversationList.innerHTML = "";
-  if (threads.length === 0) {
-    const empty = document.createElement("p");
-    empty.className = "drawer-empty";
-    empty.textContent = "这个项目还没有对话。";
-    els.conversationList.append(empty);
-    return;
-  }
-
-  for (const thread of threads) {
-    const button = document.createElement("button");
-    button.className = `conversation-item${thread.threadId === state.threadId ? " active" : ""}`;
-    button.type = "button";
-    button.innerHTML = `<span>${escapeHtml(thread.title || thread.projectName || "New chat")}</span><small>${formatTime(thread.lastMessageAt || thread.createdAt)}</small>`;
-    button.addEventListener("click", async () => {
-      await selectThread(thread.threadId);
-      closeDrawer();
+  for (const group of state.conversations) {
+    const section = document.createElement("details");
+    section.className = "project-group";
+    section.open = group.id === (els.projectSelect.value || state.projects[0]?.id);
+    section.innerHTML = `<summary><span>${escapeHtml(group.name)}</span><small>${group.threads?.length || 0}</small></summary>`;
+    const actions = document.createElement("div");
+    actions.className = "project-actions";
+    const create = document.createElement("button");
+    create.className = "ghost-btn";
+    create.type = "button";
+    create.textContent = "新建对话";
+    create.addEventListener("click", async () => {
+      els.projectSelect.value = group.id;
+      els.newThreadBtn.click();
     });
-    els.conversationList.append(button);
+    actions.append(create);
+    section.append(actions);
+
+    const threads = group.threads || [];
+    if (threads.length === 0) {
+      const empty = document.createElement("p");
+      empty.className = "drawer-empty";
+      empty.textContent = "暂无对话";
+      section.append(empty);
+    } else {
+      for (const thread of threads) section.append(renderThreadButton(thread));
+    }
+    els.conversationList.append(section);
   }
+}
+
+function renderThreadButton(thread) {
+  const button = document.createElement("button");
+  button.className = `conversation-item${thread.threadId === state.threadId ? " active" : ""}`;
+  button.type = "button";
+  button.innerHTML = `<span>${escapeHtml(thread.title || thread.projectName || "New chat")}</span><small>${formatTime(thread.lastMessageAt || thread.createdAt)}</small>`;
+  button.addEventListener("click", async () => {
+    await selectThread(thread.threadId);
+    closeDrawer();
+  });
+  return button;
 }
 
 async function selectThread(threadId, options = {}) {
@@ -249,28 +295,19 @@ async function selectThread(threadId, options = {}) {
 function renderMessages(messages) {
   els.messages.innerHTML = "";
   state.messageNodes.clear();
-  if (messages.length === 0) {
-    renderEmpty("这段对话还没有消息。");
-    return;
-  }
-  for (const message of messages) {
-    upsertMessage(message);
-  }
+  if (messages.length === 0) return renderEmpty("这段对话还没有消息。");
+  for (const message of messages) upsertMessage(message);
 }
 
 function upsertMessage(message) {
   const existing = state.messageNodes.get(message.id);
-  if (existing) {
-    fillMessage(existing, message);
-    return;
-  }
-
+  if (existing) return fillMessage(existing, message);
   const node = document.createElement("article");
   node.className = `bubble-row ${message.role}`;
   node.dataset.messageId = message.id;
-  node.innerHTML = `<div class="bubble"></div>`;
+  const avatar = message.role === "user" ? "我" : message.role === "agent" ? "AI" : "!";
+  node.innerHTML = `<div class="avatar">${avatar}</div><div class="bubble"></div>`;
   fillMessage(node, message);
-
   const empty = els.messages.querySelector(".empty");
   if (empty) empty.remove();
   els.messages.append(node);
@@ -280,20 +317,60 @@ function upsertMessage(message) {
 
 function fillMessage(node, message) {
   const bubble = node.querySelector(".bubble");
-  if (message.role === "agent") {
-    bubble.innerHTML = renderMarkdown(message.text || "");
-  } else {
-    bubble.textContent = message.text || "";
-  }
+  if (message.role === "agent") bubble.innerHTML = renderMarkdown(linkifyFiles(message.text || ""));
+  else bubble.innerHTML = `${escapeHtml(message.text || "").replace(/\n/g, "<br>")}${renderAttachments(message.attachments || [])}`;
   els.messages.scrollTop = els.messages.scrollHeight;
 }
 
-function addSystemMessage(text) {
-  upsertMessage({
-    id: `system_${Date.now()}`,
-    role: "system",
-    text
+function renderAttachments(attachments) {
+  if (!attachments.length) return "";
+  return `<div class="message-attachments">${attachments
+    .map((item) => {
+      const href = `/api/files?path=${encodeURIComponent(item.path)}&token=${encodeURIComponent(state.token)}`;
+      if (item.kind === "image") return `<a class="attachment image" href="${href}" target="_blank"><img src="${href}" alt="${escapeHtml(item.name)}"><span>${escapeHtml(item.name)}</span></a>`;
+      return `<a class="attachment file" href="${href}" target="_blank">文件 · ${escapeHtml(item.name)}</a>`;
+    })
+    .join("")}</div>`;
+}
+
+async function uploadFile(file) {
+  const dataUrl = await readFileAsDataUrl(file);
+  const { upload } = await api("/api/uploads", {
+    method: "POST",
+    body: { name: file.name, type: file.type, dataUrl }
   });
+  state.attachments.push(upload);
+  renderAttachmentTray();
+}
+
+function renderAttachmentTray() {
+  els.attachmentTray.innerHTML = state.attachments
+    .map((item, index) => `<button type="button" class="chip" data-index="${index}">${item.kind === "image" ? "图片" : "文件"} · ${escapeHtml(item.name)} ×</button>`)
+    .join("");
+  els.attachmentTray.querySelectorAll(".chip").forEach((chip) => {
+    chip.addEventListener("click", () => {
+      state.attachments.splice(Number(chip.dataset.index), 1);
+      renderAttachmentTray();
+    });
+  });
+}
+
+function clearAttachments() {
+  state.attachments = [];
+  renderAttachmentTray();
+}
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+function addSystemMessage(text) {
+  upsertMessage({ id: `system_${Date.now()}`, role: "system", text });
 }
 
 function renderEmpty(text) {
@@ -301,15 +378,10 @@ function renderEmpty(text) {
 }
 
 function renderStatus(status) {
-  if (status?.connected && status?.initialized) {
-    els.statusText.textContent = "Codex 已连接";
-  } else if (status?.connected) {
-    els.statusText.textContent = "Codex 正在初始化";
-  } else if (status?.lastError) {
-    els.statusText.textContent = `Codex 未连接：${status.lastError}`;
-  } else {
-    els.statusText.textContent = "Codex 未连接";
-  }
+  if (status?.connected && status?.initialized) els.statusText.textContent = "Codex 已连接";
+  else if (status?.connected) els.statusText.textContent = "Codex 正在初始化";
+  else if (status?.lastError) els.statusText.textContent = `Codex 未连接：${status.lastError}`;
+  else els.statusText.textContent = "Codex 未连接";
 }
 
 function openDrawer() {
@@ -325,24 +397,15 @@ function closeDrawer() {
 }
 
 async function api(path, options = {}) {
-  const headers = {
-    authorization: `Bearer ${state.token}`
-  };
+  const headers = { authorization: `Bearer ${state.token}` };
   let body;
   if (options.body) {
     headers["content-type"] = "application/json";
     body = JSON.stringify(options.body);
   }
-
-  const res = await fetch(path, {
-    method: options.method || "GET",
-    headers,
-    body
-  });
+  const res = await fetch(path, { method: options.method || "GET", headers, body });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    throw new Error(data.error || `HTTP ${res.status}`);
-  }
+  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
   return data;
 }
 
@@ -355,10 +418,7 @@ function renderMarkdown(text) {
         const lines = part.replace(/^\w+\n/, "").replace(/\n$/, "");
         return `<pre><code>${lines}</code></pre>`;
       }
-      return part
-        .split(/\n{2,}/)
-        .map((block) => formatMarkdownBlock(block))
-        .join("");
+      return part.split(/\n{2,}/).map(formatMarkdownBlock).join("");
     })
     .join("");
 }
@@ -367,12 +427,7 @@ function formatMarkdownBlock(block) {
   const trimmed = block.trim();
   if (!trimmed) return "";
   if (/^([-*]\s.+\n?)+$/m.test(trimmed)) {
-    const items = trimmed
-      .split("\n")
-      .map((line) => line.replace(/^[-*]\s+/, "").trim())
-      .filter(Boolean)
-      .map((line) => `<li>${formatInline(line)}</li>`)
-      .join("");
+    const items = trimmed.split("\n").map((line) => line.replace(/^[-*]\s+/, "").trim()).filter(Boolean).map((line) => `<li>${formatInline(line)}</li>`).join("");
     return `<ul>${items}</ul>`;
   }
   return `<p>${formatInline(trimmed).replace(/\n/g, "<br>")}</p>`;
@@ -380,22 +435,24 @@ function formatMarkdownBlock(block) {
 
 function formatInline(text) {
   return text
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noreferrer">$1</a>')
     .replace(/`([^`]+)`/g, "<code>$1</code>")
     .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
 }
 
+function linkifyFiles(text) {
+  return text.replace(/([A-Za-z]:\\[^\n`'"<>]+?\.[A-Za-z0-9]{1,8})/g, (match) => {
+    const href = `/api/files?path=${encodeURIComponent(match.trim())}&token=${encodeURIComponent(state.token)}`;
+    return `[${match}](${href})`;
+  });
+}
+
 function escapeHtml(value) {
-  return String(value)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
+  return String(value).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
 function firstThread() {
-  for (const group of state.conversations) {
-    if (group.threads?.length) return group.threads[0];
-  }
+  for (const group of state.conversations) if (group.threads?.length) return group.threads[0];
   return null;
 }
 
@@ -404,6 +461,10 @@ function formatTime(value) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";
   return date.toLocaleString([], { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+}
+
+function compactNumber(value) {
+  return Intl.NumberFormat(undefined, { notation: "compact" }).format(value);
 }
 
 function autosizeInput() {

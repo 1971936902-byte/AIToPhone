@@ -136,12 +136,38 @@ h2 {
 
 .bubble-row {
   display: flex;
+  align-items: flex-end;
+  gap: 8px;
   width: 100%;
 }
 
 .bubble-row.user { justify-content: flex-end; }
 .bubble-row.agent,
 .bubble-row.system { justify-content: flex-start; }
+
+.bubble-row.user .avatar { order: 2; }
+
+.avatar {
+  width: 30px;
+  height: 30px;
+  flex: 0 0 30px;
+  border: 1px solid rgba(31, 111, 120, 0.18);
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: #fff;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.avatar.mini {
+  width: 38px;
+  height: 38px;
+  flex-basis: 38px;
+  background: var(--accent);
+  color: #fff;
+}
 
 .bubble {
   max-width: min(84%, 720px);
@@ -192,6 +218,11 @@ h2 {
   font-size: 0.92em;
 }
 
+.bubble a {
+  color: var(--accent);
+  font-weight: 800;
+}
+
 .bubble pre {
   overflow: auto;
   margin: 0 0 10px;
@@ -212,13 +243,47 @@ h2 {
 
 .composer {
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: auto 1fr auto;
   gap: 8px;
   align-items: end;
   padding: 10px 14px max(12px, env(safe-area-inset-bottom));
   border-top: 1px solid rgba(221, 216, 204, 0.76);
   background: rgba(247, 245, 239, 0.92);
   backdrop-filter: blur(16px);
+}
+
+.attach-btn {
+  width: 44px;
+  min-height: 44px;
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--accent);
+  font-size: 22px;
+  line-height: 1;
+}
+
+.compose-main {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.attachment-tray {
+  display: flex;
+  gap: 6px;
+  overflow: auto;
+}
+
+.chip {
+  min-height: 30px;
+  max-width: 220px;
+  border: 1px solid rgba(31, 111, 120, 0.2);
+  background: #fff;
+  color: var(--accent);
+  padding: 0 9px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 #messageInput {
@@ -275,6 +340,64 @@ h2 {
   gap: 8px;
 }
 
+.account-card {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  padding: 10px;
+}
+
+.account-card strong,
+.account-card span {
+  display: block;
+}
+
+.account-card strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+
+.account-card span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.usage-card {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.72);
+  padding: 9px;
+}
+
+.usage-card div {
+  display: grid;
+  gap: 2px;
+}
+
+.usage-card strong {
+  color: var(--accent);
+  font-size: 17px;
+}
+
+.usage-card span,
+.usage-card p {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.usage-card p {
+  grid-column: 1 / -1;
+}
+
 label,
 .section-title span {
   color: var(--muted);
@@ -316,6 +439,36 @@ select {
   padding-right: 2px;
 }
 
+.project-group {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.58);
+  padding: 6px;
+}
+
+.project-group summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  font-weight: 800;
+  list-style: none;
+  padding: 6px 4px;
+}
+
+.project-group summary::-webkit-details-marker { display: none; }
+
+.project-group summary small {
+  border-radius: 999px;
+  background: var(--agent);
+  color: var(--accent);
+  padding: 2px 7px;
+}
+
+.project-actions {
+  padding: 3px 0 7px;
+}
+
 .conversation-item {
   min-height: 56px;
   display: grid;
@@ -326,6 +479,30 @@ select {
   color: var(--ink);
   padding: 9px 10px;
   text-align: left;
+}
+
+.message-attachments {
+  display: grid;
+  gap: 7px;
+  margin-top: 9px;
+}
+
+.attachment {
+  color: var(--accent);
+  text-decoration: none;
+  font-weight: 700;
+}
+
+.attachment.image {
+  display: grid;
+  gap: 4px;
+}
+
+.attachment.image img {
+  max-width: 220px;
+  max-height: 180px;
+  border-radius: 8px;
+  object-fit: cover;
 }
 
 .conversation-item.active {

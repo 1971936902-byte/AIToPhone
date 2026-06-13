@@ -10,6 +10,7 @@ import { getProject, loadProjects, publicProjects } from "./lib/projects.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.resolve(__dirname, "..", "public");
+const uploadDir = path.resolve(process.cwd(), "uploads");
 const host = process.env.HOST || "0.0.0.0";
 const port = Number(process.env.PORT || 8787);
 const authToken = process.env.AUTH_TOKEN || "change-this-long-random-token";
@@ -106,6 +107,31 @@ async function handleApi(req, res, url) {
     return sendJson(res, 200, { codex: codex.getStatus() });
   }
 
+  if (req.method === "GET" && url.pathname === "/api/account") {
+    const [account, limits, usage] = await Promise.allSettled([
+      withTimeout(codex.readAccount(), 5000, "account/read timed out"),
+      withTimeout(codex.readRateLimits(), 5000, "account/rateLimits/read timed out"),
+      withTimeout(codex.readUsage(), 5000, "account/usage/read timed out")
+    ]);
+    return sendJson(res, 200, {
+      account: settledValue(account) || readLocalAccountHint(),
+      limits: settledValue(limits),
+      usage: settledValue(usage),
+      errors: settledErrors({ account, limits, usage }),
+      updatedAt: new Date().toISOString()
+    });
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/uploads") {
+    const body = await readJson(req, 25 * 1024 * 1024);
+    const upload = saveUpload(body);
+    return sendJson(res, 200, { upload });
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/files") {
+    return serveFileDownload(req, res, url);
+  }
+
   if (req.method === "POST" && url.pathname === "/api/threads") {
     const body = await readJson(req);
     const project = getProject(projects, body.projectId);
@@ -146,16 +172,18 @@ async function handleApi(req, res, url) {
     const threadId = decodeURIComponent(messageMatch[1]);
     const body = await readJson(req);
     const text = String(body.text || "").trim();
-    if (!text) {
+    const attachments = Array.isArray(body.attachments) ? body.attachments.map(resolveAttachment).filter(Boolean) : [];
+    if (!text && attachments.length === 0) {
       return sendJson(res, 400, { error: "Message text is required" });
     }
     if (!store.getThread(threadId)) {
       return sendJson(res, 404, { error: "Thread not found" });
     }
 
-    const message = store.addMessage({ threadId, role: "user", text });
+    const messageText = buildMessageText(text, attachments);
+    const message = store.addMessage({ threadId, role: "user", text: messageText, attachments });
     broadcast({ type: "message", threadId, message });
-    const result = await codex.sendMessage({ threadId, text });
+    const result = await codex.sendMessage({ threadId, text: messageText, attachments });
     return sendJson(res, 200, { message, result });
   }
 
@@ -188,12 +216,12 @@ function isAuthorized(req, url) {
   return bearer === authToken || url.searchParams.get("token") === authToken;
 }
 
-function readJson(req) {
+function readJson(req, maxBytes = 1024 * 1024) {
   return new Promise((resolve, reject) => {
     let data = "";
     req.on("data", (chunk) => {
       data += chunk;
-      if (data.length > 1024 * 1024) {
+      if (data.length > maxBytes) {
         reject(new Error("Request body too large"));
         req.destroy();
       }
@@ -211,6 +239,124 @@ function readJson(req) {
     });
     req.on("error", reject);
   });
+}
+
+function saveUpload(body) {
+  const name = path.basename(String(body.name || "upload.bin")).replace(/[^\w.\-()\u4e00-\u9fff ]/g, "_");
+  const mime = String(body.type || "application/octet-stream");
+  const dataUrl = String(body.dataUrl || "");
+  const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
+  if (!match) {
+    throw new Error("Invalid upload payload");
+  }
+
+  const buffer = Buffer.from(match[2], "base64");
+  const id = `${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  const dir = path.join(uploadDir, id);
+  fs.mkdirSync(dir, { recursive: true });
+  const filePath = path.join(dir, name);
+  fs.writeFileSync(filePath, buffer);
+  return {
+    id,
+    name,
+    mime,
+    size: buffer.length,
+    kind: mime.startsWith("image/") ? "image" : "file",
+    path: filePath,
+    url: `/api/files?path=${encodeURIComponent(filePath)}`
+  };
+}
+
+function resolveAttachment(attachment) {
+  const filePath = path.resolve(String(attachment.path || ""));
+  if (!filePath.startsWith(uploadDir) || !fs.existsSync(filePath)) {
+    return null;
+  }
+  return {
+    id: String(attachment.id || ""),
+    name: path.basename(filePath),
+    mime: String(attachment.mime || "application/octet-stream"),
+    size: Number(attachment.size || 0),
+    kind: String(attachment.kind || "").startsWith("image") ? "image" : "file",
+    path: filePath,
+    url: `/api/files?path=${encodeURIComponent(filePath)}`
+  };
+}
+
+function buildMessageText(text, attachments) {
+  if (attachments.length === 0) {
+    return text;
+  }
+  const lines = [text || "请查看我上传的附件。", "", "附件："];
+  for (const attachment of attachments) {
+    lines.push(`- ${attachment.name}: ${attachment.path}`);
+  }
+  return lines.join("\n");
+}
+
+function serveFileDownload(req, res, url) {
+  const filePath = path.resolve(url.searchParams.get("path") || "");
+  const allowedRoots = [uploadDir, ...projects.map((project) => path.resolve(project.cwd))];
+  if (!allowedRoots.some((root) => filePath === root || filePath.startsWith(`${root}${path.sep}`))) {
+    res.writeHead(403);
+    res.end("Forbidden");
+    return;
+  }
+  if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
+    res.writeHead(404);
+    res.end("Not found");
+    return;
+  }
+  res.writeHead(200, {
+    "content-type": contentType(filePath),
+    "content-disposition": `inline; filename="${encodeURIComponent(path.basename(filePath))}"`
+  });
+  fs.createReadStream(filePath).pipe(res);
+}
+
+function settledValue(result) {
+  return result.status === "fulfilled" ? result.value : null;
+}
+
+function settledErrors(results) {
+  const errors = {};
+  for (const [key, result] of Object.entries(results)) {
+    if (result.status === "rejected") {
+      errors[key] = result.reason?.message || String(result.reason);
+    }
+  }
+  return errors;
+}
+
+function withTimeout(promise, ms, message) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error(message)), ms))
+  ]);
+}
+
+function readLocalAccountHint() {
+  try {
+    const authPath = path.join(process.env.USERPROFILE || "", ".codex", "auth.json");
+    if (!fs.existsSync(authPath)) {
+      return null;
+    }
+    const data = JSON.parse(fs.readFileSync(authPath, "utf8"));
+    const accountId = data?.tokens?.account_id || data?.account_id || data?.chatgpt_account_id;
+    if (!accountId) {
+      return null;
+    }
+    return {
+      account: {
+        type: "local",
+        accountId
+      },
+      requiresOpenaiAuth: false,
+      source: "local-auth-hint"
+    };
+  } catch {
+    return null;
+  }
 }
 
 function sendJson(res, status, payload) {
@@ -259,5 +405,11 @@ function contentType(file) {
   if (file.endsWith(".js")) return "text/javascript; charset=utf-8";
   if (file.endsWith(".json") || file.endsWith(".webmanifest")) return "application/json; charset=utf-8";
   if (file.endsWith(".svg")) return "image/svg+xml";
+  if (file.endsWith(".png")) return "image/png";
+  if (file.endsWith(".jpg") || file.endsWith(".jpeg")) return "image/jpeg";
+  if (file.endsWith(".gif")) return "image/gif";
+  if (file.endsWith(".webp")) return "image/webp";
+  if (file.endsWith(".txt") || file.endsWith(".md")) return "text/plain; charset=utf-8";
+  if (file.endsWith(".pdf")) return "application/pdf";
   return "application/octet-stream";
 }

@@ -66,7 +66,7 @@ export class ConversationStore {
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   }
 
-  addMessage({ threadId, role, text, messageId, turnId }) {
+  addMessage({ threadId, role, text, messageId, turnId, attachments = [] }) {
     const id = messageId || `${role}_${Date.now()}_${Math.random().toString(36).slice(2)}`;
     const message = {
       id,
@@ -74,6 +74,7 @@ export class ConversationStore {
       turnId: turnId || null,
       role,
       text,
+      attachments,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };
