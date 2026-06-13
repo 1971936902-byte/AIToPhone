@@ -1,0 +1,9 @@
+{
+  "projects": [
+    {
+      "id": "aitophone",
+      "name": "AIToPhone",
+      "cwd": "."
+    }
+  ]
+}
