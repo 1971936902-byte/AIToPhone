@@ -9,7 +9,7 @@
     <meta name="theme-color" content="#1f6f78" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/icon.svg" />
-    <link rel="stylesheet" href="/styles.css?v=5" />
+    <link rel="stylesheet" href="/styles.css?v=6" />
     <title>AIToPhone</title>
   </head>
   <body>
@@ -33,6 +33,15 @@
             <button id="refreshAccountBtn" class="ghost-btn">刷新</button>
           </div>
           <div id="usageCard" class="usage-card"></div>
+        </section>
+
+        <section class="drawer-section">
+          <label for="gatewayInput">网关地址</label>
+          <div class="token-row">
+            <input id="gatewayInput" type="url" inputmode="url" placeholder="http://电脑虚拟IP:8787" />
+            <button id="saveGatewayBtn">保存</button>
+          </div>
+          <p class="hint">网页版可留空；iOS App 内请填写蒲公英/Tailscale 地址。</p>
         </section>
 
         <section class="drawer-section">
@@ -84,6 +93,6 @@
         <pre id="limitsOutput"></pre>
       </dialog>
     </main>
-    <script src="/app.js?v=5" type="module"></script>
+    <script src="/app.js?v=6" type="module"></script>
   </body>
 </html>

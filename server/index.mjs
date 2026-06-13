@@ -26,6 +26,9 @@ if (authToken === "change-this-long-random-token") {
 const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
+    if (req.method === "OPTIONS") {
+      return sendEmpty(res, 204);
+    }
 
     if (url.pathname.startsWith("/api/")) {
       if (!isAuthorized(req, url)) {
@@ -362,9 +365,15 @@ function readLocalAccountHint() {
 function sendJson(res, status, payload) {
   res.writeHead(status, {
     "content-type": "application/json; charset=utf-8",
-    "cache-control": "no-store"
+    "cache-control": "no-store",
+    ...corsHeaders()
   });
   res.end(JSON.stringify(payload));
+}
+
+function sendEmpty(res, status) {
+  res.writeHead(status, corsHeaders());
+  res.end();
 }
 
 function serveStatic(res, pathname) {
@@ -384,10 +393,19 @@ function serveStatic(res, pathname) {
     }
     res.writeHead(200, {
       "content-type": contentType(fullPath),
-      "cache-control": "no-store"
+      "cache-control": "no-store",
+      ...corsHeaders()
     });
     res.end(data);
   });
+}
+
+function corsHeaders() {
+  return {
+    "access-control-allow-origin": "*",
+    "access-control-allow-methods": "GET,POST,OPTIONS",
+    "access-control-allow-headers": "authorization,content-type"
+  };
 }
 
 function broadcast(payload) {

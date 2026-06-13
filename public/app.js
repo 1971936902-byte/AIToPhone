@@ -4,6 +4,10 @@ const state = {
     localStorage.getItem("aitophone_token") ||
     localStorage.getItem("callcodex_token") ||
     "",
+  gatewayBaseUrl:
+    new URLSearchParams(location.search).get("gateway") ||
+    localStorage.getItem("aitophone_gateway") ||
+    "",
   projects: [],
   conversations: [],
   threadId: localStorage.getItem("aitophone_thread") || localStorage.getItem("callcodex_thread") || "",
@@ -25,6 +29,8 @@ const els = {
   accountPlan: document.querySelector("#accountPlan"),
   usageCard: document.querySelector("#usageCard"),
   refreshAccountBtn: document.querySelector("#refreshAccountBtn"),
+  gatewayInput: document.querySelector("#gatewayInput"),
+  saveGatewayBtn: document.querySelector("#saveGatewayBtn"),
   tokenInput: document.querySelector("#tokenInput"),
   saveTokenBtn: document.querySelector("#saveTokenBtn"),
   projectSelect: document.querySelector("#projectSelect"),
@@ -44,12 +50,20 @@ const els = {
 };
 
 els.tokenInput.value = state.token;
+els.gatewayInput.value = state.gatewayBaseUrl;
 renderEmpty("打开侧边栏，选择项目后开始对话");
 
 els.openDrawerBtn.addEventListener("click", openDrawer);
 els.closeDrawerBtn.addEventListener("click", closeDrawer);
 els.scrim.addEventListener("click", closeDrawer);
 els.refreshAccountBtn.addEventListener("click", loadAccount);
+els.saveGatewayBtn.addEventListener("click", () => {
+  state.gatewayBaseUrl = normalizeGatewayUrl(els.gatewayInput.value);
+  els.gatewayInput.value = state.gatewayBaseUrl;
+  localStorage.setItem("aitophone_gateway", state.gatewayBaseUrl);
+  connectEvents();
+  loadConfig();
+});
 
 els.saveTokenBtn.addEventListener("click", () => {
   state.token = els.tokenInput.value.trim();
@@ -206,7 +220,7 @@ function connectEvents() {
   if (state.ws) state.ws.close();
 
   const protocol = location.protocol === "https:" ? "wss:" : "ws:";
-  state.ws = new WebSocket(`${protocol}//${location.host}/events?token=${encodeURIComponent(state.token)}`);
+  state.ws = new WebSocket(`${eventBaseUrl(protocol)}/events?token=${encodeURIComponent(state.token)}`);
   state.ws.addEventListener("open", () => (els.statusText.textContent = "网关已连接"));
   state.ws.addEventListener("message", async (event) => {
     const payload = JSON.parse(event.data);
@@ -326,7 +340,7 @@ function renderAttachments(attachments) {
   if (!attachments.length) return "";
   return `<div class="message-attachments">${attachments
     .map((item) => {
-      const href = `/api/files?path=${encodeURIComponent(item.path)}&token=${encodeURIComponent(state.token)}`;
+      const href = fileUrl(item.path);
       if (item.kind === "image") return `<a class="attachment image" href="${href}" target="_blank"><img src="${href}" alt="${escapeHtml(item.name)}"><span>${escapeHtml(item.name)}</span></a>`;
       return `<a class="attachment file" href="${href}" target="_blank">文件 · ${escapeHtml(item.name)}</a>`;
     })
@@ -403,7 +417,7 @@ async function api(path, options = {}) {
     headers["content-type"] = "application/json";
     body = JSON.stringify(options.body);
   }
-  const res = await fetch(path, { method: options.method || "GET", headers, body });
+  const res = await fetch(apiUrl(path), { method: options.method || "GET", headers, body });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
   return data;
@@ -442,9 +456,27 @@ function formatInline(text) {
 
 function linkifyFiles(text) {
   return text.replace(/([A-Za-z]:\\[^\n`'"<>]+?\.[A-Za-z0-9]{1,8})/g, (match) => {
-    const href = `/api/files?path=${encodeURIComponent(match.trim())}&token=${encodeURIComponent(state.token)}`;
+    const href = fileUrl(match.trim());
     return `[${match}](${href})`;
   });
+}
+
+function apiUrl(path) {
+  if (!state.gatewayBaseUrl) return path;
+  return `${state.gatewayBaseUrl}${path}`;
+}
+
+function fileUrl(path) {
+  return `${apiUrl("/api/files")}?path=${encodeURIComponent(path)}&token=${encodeURIComponent(state.token)}`;
+}
+
+function eventBaseUrl(protocol) {
+  if (!state.gatewayBaseUrl) return `${protocol}//${location.host}`;
+  return state.gatewayBaseUrl.replace(/^http:/, "ws:").replace(/^https:/, "wss:");
+}
+
+function normalizeGatewayUrl(value) {
+  return String(value || "").trim().replace(/\/+$/, "");
 }
 
 function escapeHtml(value) {

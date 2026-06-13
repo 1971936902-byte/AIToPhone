@@ -6,11 +6,17 @@
   "scripts": {
     "start": "node server/index.mjs",
     "dev": "node server/index.mjs",
-    "check": "node server/check.mjs"
+    "check": "node server/check.mjs",
+    "sync:ios": "cap sync ios",
+    "open:ios": "cap open ios"
   },
   "dependencies": {
+    "@capacitor/core": "^8.4.0",
+    "@capacitor/ios": "^8.4.0",
     "dotenv": "^16.4.7",
     "ws": "^8.18.0"
   },
-  "devDependencies": {}
+  "devDependencies": {
+    "@capacitor/cli": "^8.4.0"
+  }
 }
