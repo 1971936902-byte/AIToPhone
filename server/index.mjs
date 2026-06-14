@@ -7,6 +7,7 @@ import { WebSocketServer } from "ws";
 import { CodexAppServer } from "./lib/codexAppServer.mjs";
 import { ConversationStore, normalizeCodexEvent } from "./lib/conversationStore.mjs";
 import { createProject, getProject, loadProjects, publicProjects, refreshProjects, removeProject } from "./lib/projects.mjs";
+import { ScheduledMessageStore } from "./lib/scheduledMessages.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.resolve(__dirname, "..", "public");
@@ -15,13 +16,17 @@ const host = process.env.HOST || "0.0.0.0";
 const port = Number(process.env.PORT || 8787);
 const authToken = process.env.AUTH_TOKEN || "change-this-long-random-token";
 const syncIntervalMs = Number(process.env.SYNC_INTERVAL_MS || 3000);
+const schedulerIntervalMs = Math.min(Number(process.env.SCHEDULER_INTERVAL_MS || 1000), 4000);
 const accountSyncIntervalMs = Number(process.env.ACCOUNT_SYNC_INTERVAL_MS || 30000);
 let projects = loadProjects();
 const codex = new CodexAppServer();
 const clients = new Set();
 const store = new ConversationStore(projects);
+const schedules = new ScheduledMessageStore();
 let syncSeq = 0;
 let syncTimer = null;
+let schedulerTimer = null;
+let schedulerRunning = false;
 let syncRunning = false;
 let accountSyncRunning = false;
 let lastAccountSyncAt = 0;
@@ -103,6 +108,7 @@ server.listen(port, host, () => {
   console.log(`AIToPhone listening on http://${host}:${port}`);
   console.log("Open this from iPhone through Tailscale: http://WINDOWS_TAILSCALE_IP:" + port + "/?token=AUTH_TOKEN");
   startSyncLoop();
+  startSchedulerLoop();
 });
 
 async function handleApi(req, res, url) {
@@ -111,7 +117,8 @@ async function handleApi(req, res, url) {
       codex: codex.getStatus(),
       projects: publicProjects(projects),
       conversations: store.listConversations(),
-      account: buildAccountSnapshotFromCache()
+      account: buildAccountSnapshotFromCache(),
+      scheduledMessages: schedules.list()
     });
   }
 
@@ -178,6 +185,51 @@ async function handleApi(req, res, url) {
     return serveFileDownload(req, res, url);
   }
 
+  if (req.method === "GET" && url.pathname === "/api/scheduled-messages") {
+    return sendJson(res, 200, { scheduledMessages: schedules.list() });
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/scheduled-messages") {
+    const body = await readJson(req);
+    const threadId = String(body.threadId || "");
+    const thread = store.getThread(threadId);
+    if (!thread) {
+      return sendJson(res, 404, { error: "Thread not found" });
+    }
+
+    const text = String(body.text || "").trim();
+    const attachments = Array.isArray(body.attachments) ? body.attachments.map(resolveAttachment).filter(Boolean) : [];
+    if (!text && attachments.length === 0) {
+      return sendJson(res, 400, { error: "Message text is required" });
+    }
+
+    const sendAt = parseScheduleTime(body);
+    if (!sendAt) {
+      return sendJson(res, 400, { error: "Schedule time must be in the future" });
+    }
+
+    const job = schedules.create({
+      threadId,
+      projectId: thread.projectId,
+      text,
+      attachments,
+      sendAt
+    });
+    broadcastSync("schedule-created", { scheduledMessages: schedules.list() });
+    return sendJson(res, 200, { scheduledMessage: job, scheduledMessages: schedules.list() });
+  }
+
+  const scheduleMatch = url.pathname.match(/^\/api\/scheduled-messages\/([^/]+)$/);
+  if (req.method === "DELETE" && scheduleMatch) {
+    const jobId = decodeURIComponent(scheduleMatch[1]);
+    const job = schedules.cancel(jobId);
+    if (!job) {
+      return sendJson(res, 404, { error: "Scheduled message not found" });
+    }
+    broadcastSync("schedule-cancelled", { scheduledMessages: schedules.list() });
+    return sendJson(res, 200, { ok: true, scheduledMessage: job, scheduledMessages: schedules.list() });
+  }
+
   if (req.method === "POST" && url.pathname === "/api/threads") {
     const body = await readJson(req);
     const project = getProject(projects, body.projectId);
@@ -194,6 +246,7 @@ async function handleApi(req, res, url) {
   if (req.method === "DELETE" && projectMatch) {
     const projectId = decodeURIComponent(projectMatch[1]);
     const removedThreadIds = store.deleteProjectThreads(projectId);
+    const cancelledSchedules = schedules.deleteForProject(projectId);
     const codexUnsubscribe = await unsubscribeThreads(removedThreadIds);
     const removed = removeProject(projectId, projects);
     if (!removed.removed) {
@@ -201,11 +254,12 @@ async function handleApi(req, res, url) {
     }
     projects = removed.projects;
     store.setProjects(projects);
-    broadcastSync("project-deleted", { projectId, removedThreadIds, codexUnsubscribe });
+    broadcastSync("project-deleted", { projectId, removedThreadIds, cancelledSchedules, codexUnsubscribe });
     return sendJson(res, 200, {
       ok: true,
       projectId,
       removedThreadIds,
+      cancelledSchedules,
       codexUnsubscribe,
       projects: publicProjects(projects),
       conversations: store.listConversations()
@@ -220,8 +274,9 @@ async function handleApi(req, res, url) {
     if (!deleted) {
       return sendJson(res, 404, { error: "Thread not found" });
     }
-    broadcastSync("thread-deleted", { threadId, codexUnsubscribe });
-    return sendJson(res, 200, { ok: true, threadId, codexUnsubscribe });
+    const cancelledSchedules = schedules.deleteForThread(threadId);
+    broadcastSync("thread-deleted", { threadId, cancelledSchedules, codexUnsubscribe });
+    return sendJson(res, 200, { ok: true, threadId, cancelledSchedules, codexUnsubscribe });
   }
 
   if (req.method === "GET" && threadMatch) {
@@ -246,11 +301,7 @@ async function handleApi(req, res, url) {
       return sendJson(res, 404, { error: "Thread not found" });
     }
 
-    const messageText = buildMessageText(text, attachments);
-    const message = store.addMessage({ threadId, role: "user", text: messageText, attachments });
-    broadcastFrame("message", "user-message", { threadId, message });
-    broadcastSync("user-message");
-    const result = await codex.sendMessage({ threadId, text: messageText, attachments });
+    const { message, result } = await sendThreadMessage({ threadId, text, attachments, event: "user-message" });
     return sendJson(res, 200, { message, result });
   }
 
@@ -394,6 +445,34 @@ function buildMessageText(text, attachments) {
   return lines.join("\n");
 }
 
+function parseScheduleTime(body) {
+  const now = Date.now();
+  if (body.sendAt) {
+    const sendAtMs = new Date(body.sendAt).getTime();
+    if (Number.isFinite(sendAtMs) && sendAtMs > now + 1000) {
+      return new Date(sendAtMs).toISOString();
+    }
+    return null;
+  }
+
+  const delayHours = Math.max(0, Number(body.delayHours || 0));
+  const delayMinutes = Math.max(0, Number(body.delayMinutes || 0));
+  const delayMs = Math.round((delayHours * 60 + delayMinutes) * 60 * 1000);
+  if (!Number.isFinite(delayMs) || delayMs < 60 * 1000) {
+    return null;
+  }
+  return new Date(now + delayMs).toISOString();
+}
+
+async function sendThreadMessage({ threadId, text, attachments, event }) {
+  const messageText = buildMessageText(text, attachments);
+  const message = store.addMessage({ threadId, role: "user", text: messageText, attachments });
+  broadcastFrame("message", event, { threadId, message });
+  broadcastSync(event);
+  const result = await codex.sendMessage({ threadId, text: messageText, attachments });
+  return { message, result };
+}
+
 function serveFileDownload(req, res, url) {
   const filePath = path.resolve(url.searchParams.get("path") || "");
   const allowedRoots = [uploadDir, ...projects.map((project) => path.resolve(project.cwd))];
@@ -480,6 +559,57 @@ function startSyncLoop() {
   syncTimer = setInterval(() => runSyncTick("interval"), syncIntervalMs);
 }
 
+function startSchedulerLoop() {
+  if (schedulerTimer) {
+    return;
+  }
+  runSchedulerTick("startup");
+  schedulerTimer = setInterval(() => runSchedulerTick("interval"), schedulerIntervalMs);
+}
+
+async function runSchedulerTick(reason) {
+  if (schedulerRunning) {
+    return;
+  }
+  const due = schedules.getDue();
+  if (due.length === 0) {
+    return;
+  }
+
+  schedulerRunning = true;
+  try {
+    for (const job of due) {
+      await runScheduledMessage(job);
+    }
+    broadcastSync(`schedule-${reason}`, { scheduledMessages: schedules.list() });
+  } finally {
+    schedulerRunning = false;
+  }
+}
+
+async function runScheduledMessage(job) {
+  if (!schedules.markSending(job.id)) {
+    return;
+  }
+
+  try {
+    if (!store.getThread(job.threadId)) {
+      schedules.markFailed(job.id, "Thread not found");
+      return;
+    }
+
+    const { message } = await sendThreadMessage({
+      threadId: job.threadId,
+      text: job.text,
+      attachments: job.attachments || [],
+      event: "scheduled-message"
+    });
+    schedules.markSent(job.id, message.id);
+  } catch (err) {
+    schedules.markFailed(job.id, err.message || String(err));
+  }
+}
+
 async function runSyncTick(reason) {
   if (syncRunning) {
     return;
@@ -525,6 +655,7 @@ function buildSyncPayload(extra = {}) {
     projects: publicProjects(projects),
     conversations: store.listConversations(),
     account: buildAccountSnapshotFromCache(),
+    scheduledMessages: schedules.list(),
     ...extra
   };
 }

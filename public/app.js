@@ -20,6 +20,8 @@ const state = {
   messageNodes: new Map(),
   pendingThinking: new Map(),
   attachments: [],
+  scheduleDraftAttachments: [],
+  scheduledMessages: [],
   accountSnapshot: null
 };
 
@@ -52,6 +54,7 @@ const els = {
   fileInput: document.querySelector("#fileInput"),
   attachmentTray: document.querySelector("#attachmentTray"),
   messageInput: document.querySelector("#messageInput"),
+  scheduleBtn: document.querySelector("#scheduleBtn"),
   sendBtn: document.querySelector("#sendBtn"),
   connectionDialog: document.querySelector("#connectionDialog"),
   closeConnectionBtn: document.querySelector("#closeConnectionBtn"),
@@ -62,7 +65,15 @@ const els = {
   createThreadBtn: document.querySelector("#createThreadBtn"),
   newProjectName: document.querySelector("#newProjectName"),
   newProjectPath: document.querySelector("#newProjectPath"),
-  createProjectBtn: document.querySelector("#createProjectBtn")
+  createProjectBtn: document.querySelector("#createProjectBtn"),
+  scheduleDialog: document.querySelector("#scheduleDialog"),
+  closeScheduleBtn: document.querySelector("#closeScheduleBtn"),
+  scheduleText: document.querySelector("#scheduleText"),
+  scheduleHours: document.querySelector("#scheduleHours"),
+  scheduleMinutes: document.querySelector("#scheduleMinutes"),
+  scheduleAttachmentHint: document.querySelector("#scheduleAttachmentHint"),
+  createScheduleBtn: document.querySelector("#createScheduleBtn"),
+  scheduledList: document.querySelector("#scheduledList")
 };
 
 initViewportSizing();
@@ -158,6 +169,9 @@ els.createProjectBtn.addEventListener("click", async () => {
 });
 
 els.attachBtn.addEventListener("click", () => els.fileInput.click());
+els.scheduleBtn.addEventListener("click", openScheduleDialog);
+els.closeScheduleBtn.addEventListener("click", () => els.scheduleDialog.close());
+els.createScheduleBtn.addEventListener("click", createScheduledMessage);
 els.fileInput.addEventListener("change", async () => {
   const files = [...els.fileInput.files];
   els.fileInput.value = "";
@@ -397,6 +411,10 @@ function applySyncPayload(payload, reason = "", frame = {}) {
   if (payload.account) {
     state.accountSnapshot = payload.account;
     renderAccount(payload.account);
+  }
+  if (Array.isArray(payload.scheduledMessages)) {
+    state.scheduledMessages = payload.scheduledMessages;
+    renderScheduledMessages();
   }
   renderSyncIndicator(frame.createdAt || new Date().toISOString(), reason);
 }
@@ -660,6 +678,111 @@ function restoreComposerDraft(text, attachments) {
   }
 }
 
+function openScheduleDialog() {
+  if (!state.threadId) {
+    addSystemMessage("请先在侧边栏选择项目并新建对话。");
+    openDrawer();
+    return;
+  }
+  state.scheduleDraftAttachments = [...state.attachments];
+  els.scheduleText.value = els.messageInput.value.trim();
+  els.scheduleHours.value = "0";
+  els.scheduleMinutes.value = "10";
+  renderScheduleAttachmentHint();
+  renderScheduledMessages();
+  els.scheduleDialog.showModal();
+}
+
+async function createScheduledMessage() {
+  const text = els.scheduleText.value.trim();
+  const attachments = [...state.scheduleDraftAttachments];
+  const delayHours = clampNumber(els.scheduleHours.value, 0, 720);
+  const delayMinutes = clampNumber(els.scheduleMinutes.value, 0, 59);
+  if (!text && attachments.length === 0) {
+    addSystemMessage("请输入要定时发送的内容。");
+    return;
+  }
+  if (delayHours === 0 && delayMinutes === 0) {
+    addSystemMessage("定时时间至少需要 1 分钟。");
+    return;
+  }
+
+  setBusy(true);
+  try {
+    const data = await api("/api/scheduled-messages", {
+      method: "POST",
+      body: {
+        threadId: state.threadId,
+        text,
+        attachments,
+        delayHours,
+        delayMinutes
+      }
+    });
+    state.scheduledMessages = data.scheduledMessages || state.scheduledMessages;
+    if (els.messageInput.value.trim() === text) {
+      els.messageInput.value = "";
+      autosizeInput();
+    }
+    if (attachments.length) {
+      clearAttachments();
+      state.scheduleDraftAttachments = [];
+    }
+    renderScheduledMessages();
+    addSystemMessage(`已设置定时发送：${formatTime(data.scheduledMessage?.sendAt)}`);
+    els.scheduleDialog.close();
+  } catch (err) {
+    addSystemMessage(err.message);
+  } finally {
+    setBusy(false);
+  }
+}
+
+function renderScheduleAttachmentHint() {
+  const count = state.scheduleDraftAttachments.length;
+  els.scheduleAttachmentHint.textContent = count ? `将随定时消息一起发送 ${count} 个当前附件。` : "需要带图片或文件时，先用 + 上传附件，再点定时。";
+}
+
+function renderScheduledMessages() {
+  if (!els.scheduledList) return;
+  const jobs = state.scheduledMessages
+    .filter((job) => job.status === "pending" || job.status === "sending")
+    .sort((a, b) => String(a.sendAt).localeCompare(String(b.sendAt)));
+  if (jobs.length === 0) {
+    els.scheduledList.innerHTML = `<p class="drawer-empty">暂无待发送任务</p>`;
+    return;
+  }
+  els.scheduledList.innerHTML = "";
+  for (const job of jobs) {
+    const thread = findThread(job.threadId);
+    const item = document.createElement("div");
+    item.className = "scheduled-item";
+    item.innerHTML = `
+      <div>
+        <strong>${escapeHtml(thread?.title || thread?.projectName || "当前对话")}</strong>
+        <span>${escapeHtml(compactText(job.text || attachmentSummary(job.attachments), 46))}</span>
+        <small>${formatTime(job.sendAt)} · ${job.status === "sending" ? "发送中" : "待发送"}</small>
+      </div>
+    `;
+    const cancel = document.createElement("button");
+    cancel.className = "danger-inline-btn";
+    cancel.type = "button";
+    cancel.textContent = "取消";
+    cancel.disabled = job.status === "sending";
+    cancel.addEventListener("click", async () => {
+      try {
+        const data = await api(`/api/scheduled-messages/${encodeURIComponent(job.id)}`, { method: "DELETE" });
+        state.scheduledMessages = data.scheduledMessages || state.scheduledMessages;
+        renderScheduledMessages();
+      } catch (err) {
+        addSystemMessage(err.message);
+      }
+    });
+    item.append(cancel);
+    els.scheduledList.append(item);
+  }
+}
+
 function readFileAsDataUrl(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -795,6 +918,14 @@ function firstThread() {
   return null;
 }
 
+function findThread(threadId) {
+  for (const group of state.conversations) {
+    const thread = (group.threads || []).find((item) => item.threadId === threadId);
+    if (thread) return thread;
+  }
+  return null;
+}
+
 function selectedProjectId() {
   return state.projectId || state.projects[0]?.id || "";
 }
@@ -831,6 +962,21 @@ function formatTime(value) {
 
 function compactNumber(value) {
   return Intl.NumberFormat(undefined, { notation: "compact" }).format(value);
+}
+
+function compactText(value, max = 42) {
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  return text.length > max ? `${text.slice(0, max)}...` : text;
+}
+
+function attachmentSummary(attachments = []) {
+  return attachments.length ? `${attachments.length} 个附件` : "定时消息";
+}
+
+function clampNumber(value, min, max) {
+  const number = Math.floor(Number(value || 0));
+  if (!Number.isFinite(number)) return min;
+  return Math.min(max, Math.max(min, number));
 }
 
 function initViewportSizing() {
@@ -892,9 +1038,11 @@ function autosizeInput() {
 
 function setBusy(busy) {
   els.sendBtn.disabled = busy;
+  els.scheduleBtn.disabled = busy;
   els.newThreadBtn.disabled = busy;
   if (els.createThreadBtn) els.createThreadBtn.disabled = busy;
   if (els.createProjectBtn) els.createProjectBtn.disabled = busy;
+  if (els.createScheduleBtn) els.createScheduleBtn.disabled = busy;
 }
 
 function renderSyncIndicator(value, reason = "") {

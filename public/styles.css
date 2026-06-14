@@ -262,7 +262,7 @@ h2 {
   position: relative;
   z-index: 5;
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: auto 1fr auto auto;
   gap: 8px;
   align-items: end;
   padding: 10px 14px max(12px, env(safe-area-inset-bottom));
@@ -281,6 +281,14 @@ h2 {
   color: var(--accent);
   font-size: 22px;
   line-height: 1;
+}
+
+.schedule-btn {
+  min-height: 44px;
+  border: 1px solid rgba(31, 111, 120, 0.22);
+  background: #fff;
+  color: var(--accent);
+  padding: 0 10px;
 }
 
 .compose-main {
@@ -318,6 +326,19 @@ h2 {
   color: var(--ink);
   padding: 12px;
   font-size: 16px;
+  outline-color: var(--accent);
+}
+
+#scheduleText {
+  width: 100%;
+  min-height: 112px;
+  resize: vertical;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink);
+  padding: 12px;
+  font-size: 15px;
   outline-color: var(--accent);
 }
 
@@ -489,6 +510,17 @@ label,
   gap: 8px;
 }
 
+.schedule-time-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.schedule-time-row label {
+  display: grid;
+  gap: 6px;
+}
+
 input,
 select {
   width: 100%;
@@ -525,6 +557,44 @@ select {
   padding-right: 2px;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
+}
+
+.scheduled-list {
+  display: grid;
+  gap: 8px;
+  max-height: 220px;
+  overflow: auto;
+  padding-right: 2px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.scheduled-item {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.72);
+  padding: 9px;
+}
+
+.scheduled-item strong,
+.scheduled-item span,
+.scheduled-item small {
+  display: block;
+}
+
+.scheduled-item strong {
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.scheduled-item span,
+.scheduled-item small {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
 }
 
 .project-group {

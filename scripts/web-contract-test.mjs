@@ -78,8 +78,32 @@ test("Client sync loop is below 5 seconds and websocket reconnects", () => {
   assert.match(app, /setInterval\(async \(\) =>[\s\S]*}, 4000\)/);
 });
 
+test("Scheduled message UI posts delay and renders pending jobs", () => {
+  const html = read("public/index.html");
+  const app = read("public/app.js");
+  assert.match(html, /id="scheduleBtn"/);
+  assert.match(html, /id="scheduleDialog"/);
+  assert.match(html, /id="scheduleHours"/);
+  assert.match(html, /id="scheduleMinutes"/);
+  assert.match(app, /api\("\/api\/scheduled-messages"/);
+  assert.match(app, /delayHours/);
+  assert.match(app, /delayMinutes/);
+  assert.match(app, /renderScheduledMessages\(\)/);
+});
+
+test("Scheduled message API is server-side and runs under 5 seconds", () => {
+  const server = read("server/index.mjs");
+  assert.match(server, /new ScheduledMessageStore\(\)/);
+  assert.match(server, /SCHEDULER_INTERVAL_MS \|\| 1000/);
+  assert.match(server, /Math\.min\(Number\(process\.env\.SCHEDULER_INTERVAL_MS \|\| 1000\), 4000\)/);
+  assert.match(server, /\/api\/scheduled-messages/);
+  assert.match(server, /runScheduledMessage/);
+  assert.match(server, /sendThreadMessage\(\{[\s\S]*event: "scheduled-message"/);
+});
+
 await testConversationStoreContract();
 await testCodexEventNormalization();
+await testScheduledMessageStoreContract();
 
 for (const result of results) {
   if (result.ok) {
@@ -212,4 +236,46 @@ async function testCodexEventNormalization() {
       null
     );
   });
+}
+
+async function testScheduledMessageStoreContract() {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "aitophone-schedule-test-"));
+  const originalCwd = process.cwd();
+  process.chdir(tmp);
+  try {
+    const { ScheduledMessageStore } = await import(`file:///${path.join(repoRoot, "server/lib/scheduledMessages.mjs").replace(/\\/g, "/")}?t=${Date.now()}`);
+    const store = new ScheduledMessageStore();
+    const pending = store.create({
+      threadId: "thread-1",
+      projectId: "project-1",
+      text: "scheduled hello",
+      attachments: [],
+      sendAt: new Date(Date.now() + 60_000).toISOString()
+    });
+    const due = store.create({
+      threadId: "thread-1",
+      projectId: "project-1",
+      text: "due hello",
+      attachments: [],
+      sendAt: new Date(Date.now() - 1000).toISOString()
+    });
+
+    test("Scheduled store persists pending jobs and finds due jobs", () => {
+      assert.equal(store.list().length, 2);
+      assert.equal(store.getDue().map((job) => job.id).includes(due.id), true);
+      assert.equal(store.getDue().map((job) => job.id).includes(pending.id), false);
+    });
+
+    test("Scheduled store cancels and removes thread jobs from active list", () => {
+      assert.equal(store.cancel(pending.id)?.status, "cancelled");
+      assert.deepEqual(store.deleteForThread("thread-1"), [due.id]);
+      assert.equal(store.list().length, 0);
+      const reloaded = new ScheduledMessageStore();
+      assert.equal(reloaded.get(pending.id).status, "cancelled");
+      assert.equal(reloaded.get(due.id).status, "cancelled");
+    });
+  } finally {
+    process.chdir(originalCwd);
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 }

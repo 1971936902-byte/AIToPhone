@@ -9,7 +9,7 @@
     <meta name="theme-color" content="#1f6f78" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/icon.svg" />
-    <link rel="stylesheet" href="/styles.css?v=19" />
+    <link rel="stylesheet" href="/styles.css?v=20" />
     <title>AIToPhone</title>
   </head>
   <body>
@@ -76,6 +76,7 @@
           <div id="attachmentTray" class="attachment-tray"></div>
         <textarea id="messageInput" rows="1" placeholder="输入给 Codex 的消息"></textarea>
         </div>
+        <button id="scheduleBtn" class="schedule-btn" type="button">定时</button>
         <button id="sendBtn" type="submit">发送</button>
       </form>
 
@@ -114,6 +115,33 @@
           <input id="newProjectPath" type="text" placeholder="留空则创建到 Windows 文档目录" />
           <p class="hint">新建项目会在电脑端创建目录，写入 CodeX 桌面项目列表，并立即开启一个 CodeX 会话。</p>
           <button id="createProjectBtn" type="button">新建项目并开启会话</button>
+        </div>
+      </dialog>
+
+      <dialog id="scheduleDialog">
+        <div class="dialog-head">
+          <h2>定时发送</h2>
+          <button id="closeScheduleBtn" class="icon-btn">×</button>
+        </div>
+        <div class="dialog-body">
+          <label for="scheduleText">发送内容</label>
+          <textarea id="scheduleText" rows="4" placeholder="输入未来要发送给 CodeX 的消息"></textarea>
+          <div class="schedule-time-row">
+            <label>
+              <span>几小时后</span>
+              <input id="scheduleHours" type="number" min="0" max="720" step="1" value="0" inputmode="numeric" />
+            </label>
+            <label>
+              <span>几分钟后</span>
+              <input id="scheduleMinutes" type="number" min="0" max="59" step="1" value="10" inputmode="numeric" />
+            </label>
+          </div>
+          <p id="scheduleAttachmentHint" class="hint"></p>
+          <button id="createScheduleBtn" type="button">保存定时消息</button>
+          <div>
+            <label>待发送任务</label>
+            <div id="scheduledList" class="scheduled-list"></div>
+          </div>
         </div>
       </dialog>
 
@@ -168,6 +196,6 @@
         </div>
       </dialog>
     </main>
-    <script src="/app.js?v=24" type="module"></script>
+    <script src="/app.js?v=25" type="module"></script>
   </body>
 </html>
