@@ -12,6 +12,7 @@ const state = {
   conversations: [],
   projectId: localStorage.getItem("aitophone_project") || "",
   threadId: localStorage.getItem("aitophone_thread") || localStorage.getItem("callcodex_thread") || "",
+  collapsedProjects: loadCollapsedProjects(),
   ws: null,
   wsReconnectTimer: null,
   syncPollTimer: null,
@@ -408,7 +409,7 @@ function renderConversations() {
     const section = document.createElement("details");
     const selected = group.id === selectedProjectId();
     section.className = `project-group${selected ? " selected" : ""}`;
-    section.open = selected;
+    section.open = selected && !state.collapsedProjects.has(group.id);
     section.innerHTML = `
       <summary>
         <span>
@@ -420,6 +421,7 @@ function renderConversations() {
     `;
     section.querySelector("summary").addEventListener("click", (event) => {
       event.preventDefault();
+      setProjectCollapsed(group.id, section.open);
       setSelectedProject(group.id);
     });
     const actions = document.createElement("div");
@@ -784,6 +786,22 @@ function setSelectedProject(projectId, options = {}) {
   if (state.projectId) localStorage.setItem("aitophone_project", state.projectId);
   else localStorage.removeItem("aitophone_project");
   if (options.render !== false) renderConversations();
+}
+
+function loadCollapsedProjects() {
+  try {
+    const value = JSON.parse(localStorage.getItem("aitophone_collapsed_projects") || "[]");
+    return new Set(Array.isArray(value) ? value : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function setProjectCollapsed(projectId, collapsed) {
+  if (!projectId) return;
+  if (collapsed) state.collapsedProjects.add(projectId);
+  else state.collapsedProjects.delete(projectId);
+  localStorage.setItem("aitophone_collapsed_projects", JSON.stringify([...state.collapsedProjects]));
 }
 
 function formatTime(value) {
