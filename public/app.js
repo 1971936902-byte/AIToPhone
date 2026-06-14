@@ -13,6 +13,9 @@ const state = {
   projectId: localStorage.getItem("aitophone_project") || "",
   threadId: localStorage.getItem("aitophone_thread") || localStorage.getItem("callcodex_thread") || "",
   ws: null,
+  wsReconnectTimer: null,
+  syncPollTimer: null,
+  syncPollRunning: false,
   messageNodes: new Map(),
   attachments: [],
   accountSnapshot: null
@@ -81,6 +84,7 @@ els.saveGatewayBtn.addEventListener("click", () => {
   localStorage.setItem("aitophone_gateway", state.gatewayBaseUrl);
   renderConnectionSummary();
   connectEvents();
+  startClientSyncLoop();
   loadConfig();
 });
 
@@ -89,6 +93,7 @@ els.saveTokenBtn.addEventListener("click", () => {
   localStorage.setItem("aitophone_token", state.token);
   renderConnectionSummary();
   connectEvents();
+  startClientSyncLoop();
   loadConfig();
 });
 
@@ -101,6 +106,7 @@ els.clearLoginBtn.addEventListener("click", () => {
   localStorage.removeItem("callcodex_token");
   localStorage.removeItem("aitophone_gateway");
   renderConnectionSummary();
+  stopClientSyncLoop();
   if (state.ws) state.ws.close();
   els.statusText.textContent = "请重新输入访问口令";
 });
@@ -190,6 +196,7 @@ els.messageInput.addEventListener("input", autosizeInput);
 
 loadConfig();
 connectEvents();
+startClientSyncLoop();
 
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});
 
@@ -274,12 +281,17 @@ async function loadSync() {
 
 function connectEvents() {
   if (!state.token) return;
+  if (state.wsReconnectTimer) {
+    clearTimeout(state.wsReconnectTimer);
+    state.wsReconnectTimer = null;
+  }
   if (state.ws) state.ws.close();
 
   const protocol = location.protocol === "https:" ? "wss:" : "ws:";
-  state.ws = new WebSocket(`${eventBaseUrl(protocol)}/events?token=${encodeURIComponent(state.token)}`);
-  state.ws.addEventListener("open", () => (els.statusText.textContent = "\u7f51\u5173\u5df2\u8fde\u63a5"));
-  state.ws.addEventListener("message", async (event) => {
+  const ws = new WebSocket(`${eventBaseUrl(protocol)}/events?token=${encodeURIComponent(state.token)}`);
+  state.ws = ws;
+  ws.addEventListener("open", () => (els.statusText.textContent = "\u7f51\u5173\u5df2\u8fde\u63a5"));
+  ws.addEventListener("message", async (event) => {
     const frame = JSON.parse(event.data);
     const payload = frame.payload || frame;
     if (frame.type === "sync") {
@@ -303,7 +315,41 @@ function connectEvents() {
       renderAccount(payload.account);
     }
   });
-  state.ws.addEventListener("close", () => (els.statusText.textContent = "\u4e8b\u4ef6\u8fde\u63a5\u5df2\u65ad\u5f00"));
+  ws.addEventListener("close", () => {
+    if (state.ws !== ws || !state.token) return;
+    els.statusText.textContent = "\u4e8b\u4ef6\u8fde\u63a5\u5df2\u65ad\u5f00";
+    state.wsReconnectTimer = setTimeout(connectEvents, 2500);
+  });
+  ws.addEventListener("error", () => {
+    if (state.ws === ws) ws.close();
+  });
+}
+
+function startClientSyncLoop() {
+  if (!state.token || state.syncPollTimer) return;
+  state.syncPollTimer = setInterval(async () => {
+    if (!state.token || state.syncPollRunning) return;
+    state.syncPollRunning = true;
+    try {
+      await loadSync();
+    } catch {
+      // Quiet fallback: WebSocket reconnect owns the visible connection state.
+    } finally {
+      state.syncPollRunning = false;
+    }
+  }, 4000);
+}
+
+function stopClientSyncLoop() {
+  if (state.syncPollTimer) {
+    clearInterval(state.syncPollTimer);
+    state.syncPollTimer = null;
+  }
+  if (state.wsReconnectTimer) {
+    clearTimeout(state.wsReconnectTimer);
+    state.wsReconnectTimer = null;
+  }
+  state.syncPollRunning = false;
 }
 
 function applySyncPayload(payload, reason = "", frame = {}) {

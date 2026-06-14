@@ -14,7 +14,7 @@ const uploadDir = path.resolve(process.cwd(), "uploads");
 const host = process.env.HOST || "0.0.0.0";
 const port = Number(process.env.PORT || 8787);
 const authToken = process.env.AUTH_TOKEN || "change-this-long-random-token";
-const syncIntervalMs = Number(process.env.SYNC_INTERVAL_MS || 5000);
+const syncIntervalMs = Number(process.env.SYNC_INTERVAL_MS || 3000);
 const accountSyncIntervalMs = Number(process.env.ACCOUNT_SYNC_INTERVAL_MS || 30000);
 let projects = loadProjects();
 const codex = new CodexAppServer();
@@ -488,8 +488,12 @@ async function runSyncTick(reason) {
   try {
     projects = refreshProjects(projects);
     store.setProjects(projects);
-    await maybeRefreshAccount();
     broadcastSync(reason);
+    maybeRefreshAccount()
+      .then((updated) => {
+        if (updated) broadcastSync("account-refresh");
+      })
+      .catch(() => {});
   } catch (err) {
     broadcastSync("sync-error", { error: err.message || String(err) });
   } finally {
@@ -506,8 +510,10 @@ async function maybeRefreshAccount() {
   try {
     await readAccountSnapshot();
     lastAccountSyncAt = Date.now();
+    return true;
   } catch {
     lastAccountSyncAt = Date.now();
+    return false;
   } finally {
     accountSyncRunning = false;
   }

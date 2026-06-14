@@ -1,5 +1,5 @@
-const CACHE = "aitophone-v20";
-const ASSETS = ["/", "/index.html", "/styles.css?v=17", "/app.js?v=19", "/manifest.webmanifest", "/icon.svg"];
+const CACHE = "aitophone-v21";
+const ASSETS = ["/", "/index.html", "/styles.css?v=17", "/app.js?v=20", "/manifest.webmanifest", "/icon.svg"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(ASSETS)));
