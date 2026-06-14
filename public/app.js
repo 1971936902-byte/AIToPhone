@@ -174,10 +174,11 @@ els.composer.addEventListener("submit", async (event) => {
   autosizeInput();
   setBusy(true);
   try {
-    await api(`/api/threads/${encodeURIComponent(state.threadId)}/messages`, {
+    const data = await api(`/api/threads/${encodeURIComponent(state.threadId)}/messages`, {
       method: "POST",
       body: { text, attachments }
     });
+    if (data.message) upsertMessage(data.message);
   } catch (err) {
     addSystemMessage(err.message);
   } finally {
