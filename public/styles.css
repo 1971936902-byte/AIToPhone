@@ -494,6 +494,7 @@ select {
   justify-content: space-between;
   gap: 8px;
   cursor: pointer;
+  font-size: 13px;
   font-weight: 800;
   list-style: none;
   padding: 6px 4px;
@@ -501,6 +502,17 @@ select {
 
 .project-group summary span {
   min-width: 0;
+}
+
+.project-group summary span::after {
+  content: "▾";
+  margin-left: 4px;
+  color: var(--accent);
+  font-size: 11px;
+}
+
+.project-group[open] summary span::after {
+  content: "▴";
 }
 
 .project-group summary strong,
