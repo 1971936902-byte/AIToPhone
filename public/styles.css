@@ -315,9 +315,12 @@ h2 {
   z-index: 20;
   inset: 0 auto 0 0;
   width: min(88vw, 360px);
+  height: var(--app-height);
+  max-height: var(--app-height);
   display: flex;
   flex-direction: column;
   gap: 16px;
+  overflow: hidden;
   background: var(--panel);
   border-right: 1px solid var(--line);
   box-shadow: var(--shadow);
@@ -355,6 +358,12 @@ h2 {
 .drawer-section {
   display: grid;
   gap: 8px;
+}
+
+.drawer-section:last-child {
+  flex: 1;
+  min-height: 0;
+  grid-template-rows: auto minmax(0, 1fr);
 }
 
 .connection-card {
@@ -499,9 +508,12 @@ select {
 .conversation-list {
   overflow: auto;
   display: grid;
+  align-content: start;
   gap: 8px;
-  max-height: 52vh;
+  min-height: 0;
   padding-right: 2px;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
 }
 
 .project-group {
