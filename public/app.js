@@ -758,7 +758,7 @@ function compactNumber(value) {
 function initViewportSizing() {
   const viewport = window.visualViewport;
   let frame = 0;
-  let lastHeight = 0;
+  let stableHeight = Math.round(window.innerHeight);
 
   const scrollMessagesToBottom = () => {
     els.messages.scrollTop = els.messages.scrollHeight;
@@ -767,27 +767,31 @@ function initViewportSizing() {
   const sync = (options = {}) => {
     cancelAnimationFrame(frame);
     frame = requestAnimationFrame(() => {
-      const height = viewport?.height || window.innerHeight;
-      const roundedHeight = Math.round(height);
       const keyboardOpen = document.activeElement === els.messageInput;
-      const changed = Math.abs(roundedHeight - lastHeight) > 2;
-      lastHeight = roundedHeight;
+      const viewportHeight = viewport?.height || window.innerHeight;
+      const viewportOffsetTop = viewport?.offsetTop || 0;
+      if (!keyboardOpen || options.forceHeight) {
+        stableHeight = Math.round(window.innerHeight);
+      }
+      const keyboardInset = keyboardOpen
+        ? Math.max(0, Math.round(window.innerHeight - viewportHeight - viewportOffsetTop))
+        : 0;
 
-      document.documentElement.style.setProperty("--app-height", `${roundedHeight}px`);
+      document.documentElement.style.setProperty("--app-height", `${stableHeight}px`);
+      document.documentElement.style.setProperty("--keyboard-inset", `${keyboardInset}px`);
       document.documentElement.style.setProperty("--composer-height", `${Math.ceil(els.composer.getBoundingClientRect().height)}px`);
       document.body.classList.toggle("keyboard-open", keyboardOpen);
       window.scrollTo(0, 0);
 
-      if (keyboardOpen || changed || options.forceBottom) {
+      if (keyboardOpen || options.forceBottom) {
         scrollMessagesToBottom();
-        els.messageInput.scrollIntoView({ block: "nearest" });
       }
     });
   };
 
-  sync();
+  sync({ forceHeight: true });
   window.addEventListener("resize", () => sync());
-  window.addEventListener("orientationchange", () => setTimeout(sync, 250));
+  window.addEventListener("orientationchange", () => setTimeout(() => sync({ forceHeight: true }), 250));
   viewport?.addEventListener("resize", () => sync());
   viewport?.addEventListener("scroll", () => sync());
   els.messageInput.addEventListener("focus", () => {
@@ -796,8 +800,9 @@ function initViewportSizing() {
     setTimeout(() => sync({ forceBottom: true }), 260);
   });
   els.messageInput.addEventListener("blur", () => {
-    setTimeout(() => sync({ forceBottom: true }), 120);
-    setTimeout(() => sync({ forceBottom: true }), 300);
+    document.documentElement.style.setProperty("--keyboard-inset", "0px");
+    setTimeout(() => sync({ forceBottom: true, forceHeight: true }), 120);
+    setTimeout(() => sync({ forceBottom: true, forceHeight: true }), 300);
   });
 }
 
