@@ -13,7 +13,8 @@ const state = {
   threadId: localStorage.getItem("aitophone_thread") || localStorage.getItem("callcodex_thread") || "",
   ws: null,
   messageNodes: new Map(),
-  attachments: []
+  attachments: [],
+  accountSnapshot: null
 };
 
 if (state.token) localStorage.setItem("aitophone_token", state.token);
@@ -129,10 +130,11 @@ els.messageInput.addEventListener("input", autosizeInput);
 
 els.limitsBtn.addEventListener("click", async () => {
   els.limitsDialog.showModal();
-  els.limitsOutput.textContent = "读取中...";
+  els.limitsOutput.textContent = state.accountSnapshot ? formatAccountSnapshot(state.accountSnapshot) : "读取中...";
   try {
     const account = await api("/api/account");
-    els.limitsOutput.textContent = JSON.stringify(account, null, 2);
+    state.accountSnapshot = account;
+    els.limitsOutput.textContent = formatAccountSnapshot(account);
   } catch (err) {
     els.limitsOutput.textContent = err.message;
   }
@@ -175,6 +177,7 @@ async function loadAccount() {
   if (!state.token) return;
   try {
     const data = await api("/api/account");
+    state.accountSnapshot = data;
     renderAccount(data);
   } catch (err) {
     els.accountName.textContent = "账户读取失败";
@@ -182,11 +185,42 @@ async function loadAccount() {
   }
 }
 
+function formatAccountSnapshot(data) {
+  const lines = [];
+  const account = data.account?.account;
+  const limits = data.limits?.rateLimits;
+  const primary = limits?.primary;
+  const secondary = limits?.secondary;
+  const usage = data.usage?.summary;
+
+  lines.push(`账户：${account?.email || account?.type || "未读取到账户邮箱"}`);
+  if (limits?.planType) lines.push(`计划：${limits.planType}`);
+  if (typeof primary?.usedPercent === "number") {
+    lines.push(`5 小时窗口：已用 ${primary.usedPercent}% / 剩余 ${100 - primary.usedPercent}%`);
+  }
+  if (typeof secondary?.usedPercent === "number") {
+    lines.push(`7 天窗口：已用 ${secondary.usedPercent}% / 剩余 ${100 - secondary.usedPercent}%`);
+  }
+  if (usage?.lifetimeTokens) lines.push(`累计 tokens：${compactNumber(usage.lifetimeTokens)}`);
+  if (data.updatedAt) lines.push(`更新时间：${formatTime(data.updatedAt)}`);
+  if (data.stale) lines.push("提示：部分数据来自上次成功读取，CodeX 账户接口本次响应较慢。");
+
+  const errors = Object.values(data.errors || {});
+  if (errors.length) {
+    lines.push("");
+    lines.push("未完成项目：");
+    for (const error of errors) lines.push(`- ${error}`);
+  }
+
+  return lines.join("\n");
+}
+
 function renderAccount(data) {
   const account = data.account?.account;
+  const limits = data.limits?.rateLimits;
   if (!account) {
-    els.accountName.textContent = data.account?.requiresOpenaiAuth ? "需要登录 Codex" : "账户未知";
-    els.accountPlan.textContent = "未读取到账户信息";
+    els.accountName.textContent = data.account?.requiresOpenaiAuth ? "需要登录 Codex" : "Codex 已连接";
+    els.accountPlan.textContent = limits?.planType ? `计划：${limits.planType}` : "账户邮箱未暴露";
   } else if (account.type === "chatgpt") {
     els.accountName.textContent = account.email || "ChatGPT account";
     els.accountPlan.textContent = `计划：${account.planType || "unknown"}`;
@@ -195,7 +229,6 @@ function renderAccount(data) {
     els.accountPlan.textContent = "已连接";
   }
 
-  const limits = data.limits?.rateLimits;
   const primary = limits?.primary;
   const individual = limits?.individualLimit;
   const usage = data.usage?.summary;

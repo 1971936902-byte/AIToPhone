@@ -18,6 +18,12 @@ const projects = loadProjects();
 const codex = new CodexAppServer();
 const clients = new Set();
 const store = new ConversationStore(projects);
+const accountCache = {
+  account: null,
+  limits: null,
+  usage: null,
+  updatedAt: null
+};
 
 if (authToken === "change-this-long-random-token") {
   console.warn("Warning: AUTH_TOKEN is still using the example value. Change it before remote use.");
@@ -111,18 +117,7 @@ async function handleApi(req, res, url) {
   }
 
   if (req.method === "GET" && url.pathname === "/api/account") {
-    const [account, limits, usage] = await Promise.allSettled([
-      withTimeout(codex.readAccount(), 5000, "account/read timed out"),
-      withTimeout(codex.readRateLimits(), 5000, "account/rateLimits/read timed out"),
-      withTimeout(codex.readUsage(), 5000, "account/usage/read timed out")
-    ]);
-    return sendJson(res, 200, {
-      account: settledValue(account) || readLocalAccountHint(),
-      limits: settledValue(limits),
-      usage: settledValue(usage),
-      errors: settledErrors({ account, limits, usage }),
-      updatedAt: new Date().toISOString()
-    });
+    return sendJson(res, 200, await readAccountSnapshot());
   }
 
   if (req.method === "POST" && url.pathname === "/api/uploads") {
@@ -319,6 +314,43 @@ function serveFileDownload(req, res, url) {
 
 function settledValue(result) {
   return result.status === "fulfilled" ? result.value : null;
+}
+
+async function readAccountSnapshot() {
+  const [account, limits, usage] = await Promise.allSettled([
+    withTimeout(codex.readAccount(), 6000, "account/read timed out"),
+    withTimeout(codex.readRateLimits(), 6000, "account/rateLimits/read timed out"),
+    withTimeout(codex.readUsage(), 6000, "account/usage/read timed out")
+  ]);
+
+  updateAccountCache("account", account);
+  updateAccountCache("limits", limits);
+  updateAccountCache("usage", usage);
+
+  const errors = settledErrors({ account, limits, usage });
+  const accountValue = settledValue(account);
+  return {
+    account: hasAccountDetails(accountValue) ? accountValue : accountCache.account || readLocalAccountHint() || accountValue,
+    limits: settledValue(limits) || accountCache.limits,
+    usage: settledValue(usage) || accountCache.usage,
+    errors,
+    stale: Object.keys(errors).length > 0,
+    updatedAt: accountCache.updatedAt || new Date().toISOString()
+  };
+}
+
+function updateAccountCache(key, result) {
+  if (result.status === "fulfilled" && result.value) {
+    if (key === "account" && !hasAccountDetails(result.value)) {
+      return;
+    }
+    accountCache[key] = result.value;
+    accountCache.updatedAt = new Date().toISOString();
+  }
+}
+
+function hasAccountDetails(value) {
+  return Boolean(value?.account);
 }
 
 function settledErrors(results) {
