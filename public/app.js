@@ -180,6 +180,7 @@ els.composer.addEventListener("submit", async (event) => {
     });
   } catch (err) {
     addSystemMessage(err.message);
+  } finally {
     setBusy(false);
   }
 });
@@ -284,15 +285,18 @@ function connectEvents() {
       applySyncPayload(payload, frame.event, frame);
       return;
     }
-    if (payload.type === "status") return renderStatus(payload.status);
-    if (payload.type === "thread") return loadSync();
-    if (payload.type === "projects") return applySyncPayload(payload, "projects");
-    if (payload.type === "message") {
+    if (frame.type === "message") {
       await loadSync();
       if (payload.threadId === state.threadId) upsertMessage(payload.message);
       return;
     }
-    if (payload.type === "turn-complete" && payload.threadId === state.threadId) setBusy(false);
+    if (frame.type === "turn-complete") {
+      if (payload.threadId === state.threadId) setBusy(false);
+      return;
+    }
+    if (payload.type === "status") return renderStatus(payload.status);
+    if (payload.type === "thread") return loadSync();
+    if (payload.type === "projects") return applySyncPayload(payload, "projects");
     if (payload.type === "account") {
       state.accountSnapshot = payload.account;
       renderAccount(payload.account);
