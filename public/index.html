@@ -9,7 +9,7 @@
     <meta name="theme-color" content="#1f6f78" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/icon.svg" />
-    <link rel="stylesheet" href="/styles.css?v=14" />
+    <link rel="stylesheet" href="/styles.css?v=15" />
     <title>AIToPhone</title>
   </head>
   <body>
@@ -65,7 +65,6 @@
           <h1 id="chatTitle">AIToPhone</h1>
           <p id="statusText">未连接</p>
         </div>
-        <button id="limitsBtn" class="icon-btn" title="查看用量">%</button>
       </header>
 
       <section id="messages" class="messages" aria-live="polite"></section>
@@ -79,14 +78,6 @@
         </div>
         <button id="sendBtn" type="submit">发送</button>
       </form>
-
-      <dialog id="limitsDialog">
-        <div class="dialog-head">
-          <h2>用量</h2>
-          <button id="closeLimitsBtn" class="icon-btn">×</button>
-        </div>
-        <pre id="limitsOutput"></pre>
-      </dialog>
 
       <dialog id="connectionDialog">
         <div class="dialog-head">
@@ -177,6 +168,6 @@
         </div>
       </dialog>
     </main>
-    <script src="/app.js?v=15" type="module"></script>
+    <script src="/app.js?v=16" type="module"></script>
   </body>
 </html>

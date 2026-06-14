@@ -48,10 +48,6 @@ const els = {
   attachmentTray: document.querySelector("#attachmentTray"),
   messageInput: document.querySelector("#messageInput"),
   sendBtn: document.querySelector("#sendBtn"),
-  limitsBtn: document.querySelector("#limitsBtn"),
-  limitsDialog: document.querySelector("#limitsDialog"),
-  limitsOutput: document.querySelector("#limitsOutput"),
-  closeLimitsBtn: document.querySelector("#closeLimitsBtn"),
   connectionDialog: document.querySelector("#connectionDialog"),
   closeConnectionBtn: document.querySelector("#closeConnectionBtn"),
   helpDialog: document.querySelector("#helpDialog"),
@@ -190,20 +186,6 @@ els.composer.addEventListener("submit", async (event) => {
 
 els.messageInput.addEventListener("input", autosizeInput);
 
-els.limitsBtn.addEventListener("click", async () => {
-  els.limitsDialog.showModal();
-  els.limitsOutput.textContent = state.accountSnapshot ? formatAccountSnapshot(state.accountSnapshot) : "读取中...";
-  try {
-    const account = await api("/api/account");
-    state.accountSnapshot = account;
-    els.limitsOutput.textContent = formatAccountSnapshot(account);
-  } catch (err) {
-    els.limitsOutput.textContent = err.message;
-  }
-});
-
-els.closeLimitsBtn.addEventListener("click", () => els.limitsDialog.close());
-
 loadConfig();
 connectEvents();
 
@@ -245,36 +227,6 @@ async function loadAccount() {
   }
 }
 
-function formatAccountSnapshot(data) {
-  const lines = [];
-  const account = data.account?.account;
-  const limits = data.limits?.rateLimits;
-  const primary = limits?.primary;
-  const secondary = limits?.secondary;
-  const usage = data.usage?.summary;
-
-  lines.push(`账户：${account?.email || account?.type || "未读取到账户邮箱"}`);
-  if (limits?.planType) lines.push(`计划：${limits.planType}`);
-  if (typeof primary?.usedPercent === "number") {
-    lines.push(`5 小时窗口：已用 ${primary.usedPercent}% / 剩余 ${100 - primary.usedPercent}%`);
-  }
-  if (typeof secondary?.usedPercent === "number") {
-    lines.push(`7 天窗口：已用 ${secondary.usedPercent}% / 剩余 ${100 - secondary.usedPercent}%`);
-  }
-  if (usage?.lifetimeTokens) lines.push(`累计 tokens：${compactNumber(usage.lifetimeTokens)}`);
-  if (data.updatedAt) lines.push(`更新时间：${formatTime(data.updatedAt)}`);
-  if (data.stale) lines.push("提示：部分数据来自上次成功读取，CodeX 账户接口本次响应较慢。");
-
-  const errors = Object.values(data.errors || {});
-  if (errors.length) {
-    lines.push("");
-    lines.push("未完成项目：");
-    for (const error of errors) lines.push(`- ${error}`);
-  }
-
-  return lines.join("\n");
-}
-
 function renderAccount(data) {
   const account = data.account?.account;
   const limits = data.limits?.rateLimits;
@@ -290,16 +242,26 @@ function renderAccount(data) {
   }
 
   const primary = limits?.primary;
+  const secondary = limits?.secondary;
   const individual = limits?.individualLimit;
   const usage = data.usage?.summary;
   const reset = primary?.resetsAt || individual?.resetsAt;
   const remaining = individual?.remainingPercent ?? (typeof primary?.usedPercent === "number" ? 100 - primary.usedPercent : null);
+  const primaryRemaining = remainingPercent(primary);
+  const secondaryRemaining = remainingPercent(secondary);
   els.usageCard.innerHTML = `
     <div><strong>${remaining == null ? "--" : `${remaining}%`}</strong><span>剩余额度</span></div>
-    <div><strong>${primary?.usedPercent ?? "--"}%</strong><span>已用窗口</span></div>
+    <div><strong>${primaryRemaining == null ? "--" : `${primaryRemaining}%`}</strong><span>5h 剩余</span></div>
+    <div><strong>${secondaryRemaining == null ? "--" : `${secondaryRemaining}%`}</strong><span>7天剩余</span></div>
     <div><strong>${usage?.lifetimeTokens ? compactNumber(usage.lifetimeTokens) : "--"}</strong><span>累计 tokens</span></div>
     <p>更新：${formatTime(data.updatedAt)}${reset ? ` · 重置：${formatTime(reset * 1000)}` : ""}</p>
   `;
+}
+
+function remainingPercent(limit) {
+  if (typeof limit?.remainingPercent === "number") return limit.remainingPercent;
+  if (typeof limit?.usedPercent === "number") return Math.max(0, 100 - limit.usedPercent);
+  return null;
 }
 
 async function loadSync() {
