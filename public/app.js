@@ -30,10 +30,14 @@ const els = {
   accountPlan: document.querySelector("#accountPlan"),
   usageCard: document.querySelector("#usageCard"),
   refreshAccountBtn: document.querySelector("#refreshAccountBtn"),
+  connectionSummary: document.querySelector("#connectionSummary"),
+  openConnectionBtn: document.querySelector("#openConnectionBtn"),
+  openHelpBtn: document.querySelector("#openHelpBtn"),
   gatewayInput: document.querySelector("#gatewayInput"),
   saveGatewayBtn: document.querySelector("#saveGatewayBtn"),
   tokenInput: document.querySelector("#tokenInput"),
   saveTokenBtn: document.querySelector("#saveTokenBtn"),
+  clearLoginBtn: document.querySelector("#clearLoginBtn"),
   projectSelect: document.querySelector("#projectSelect"),
   conversationList: document.querySelector("#conversationList"),
   refreshProjectsBtn: document.querySelector("#refreshProjectsBtn"),
@@ -48,21 +52,31 @@ const els = {
   limitsBtn: document.querySelector("#limitsBtn"),
   limitsDialog: document.querySelector("#limitsDialog"),
   limitsOutput: document.querySelector("#limitsOutput"),
-  closeLimitsBtn: document.querySelector("#closeLimitsBtn")
+  closeLimitsBtn: document.querySelector("#closeLimitsBtn"),
+  connectionDialog: document.querySelector("#connectionDialog"),
+  closeConnectionBtn: document.querySelector("#closeConnectionBtn"),
+  helpDialog: document.querySelector("#helpDialog"),
+  closeHelpBtn: document.querySelector("#closeHelpBtn")
 };
 
 els.tokenInput.value = state.token;
 els.gatewayInput.value = state.gatewayBaseUrl;
 renderEmpty("打开侧边栏，选择项目后开始对话");
+renderConnectionSummary();
 
 els.openDrawerBtn.addEventListener("click", openDrawer);
 els.closeDrawerBtn.addEventListener("click", closeDrawer);
 els.scrim.addEventListener("click", closeDrawer);
 els.refreshAccountBtn.addEventListener("click", loadAccount);
+els.openConnectionBtn.addEventListener("click", openConnectionDialog);
+els.closeConnectionBtn.addEventListener("click", () => els.connectionDialog.close());
+els.openHelpBtn.addEventListener("click", () => els.helpDialog.showModal());
+els.closeHelpBtn.addEventListener("click", () => els.helpDialog.close());
 els.saveGatewayBtn.addEventListener("click", () => {
   state.gatewayBaseUrl = normalizeGatewayUrl(els.gatewayInput.value);
   els.gatewayInput.value = state.gatewayBaseUrl;
   localStorage.setItem("aitophone_gateway", state.gatewayBaseUrl);
+  renderConnectionSummary();
   connectEvents();
   loadConfig();
 });
@@ -70,8 +84,22 @@ els.saveGatewayBtn.addEventListener("click", () => {
 els.saveTokenBtn.addEventListener("click", () => {
   state.token = els.tokenInput.value.trim();
   localStorage.setItem("aitophone_token", state.token);
+  renderConnectionSummary();
   connectEvents();
   loadConfig();
+});
+
+els.clearLoginBtn.addEventListener("click", () => {
+  state.token = "";
+  state.gatewayBaseUrl = "";
+  els.tokenInput.value = "";
+  els.gatewayInput.value = "";
+  localStorage.removeItem("aitophone_token");
+  localStorage.removeItem("callcodex_token");
+  localStorage.removeItem("aitophone_gateway");
+  renderConnectionSummary();
+  if (state.ws) state.ws.close();
+  els.statusText.textContent = "请重新输入访问口令";
 });
 
 els.projectSelect.addEventListener("change", renderConversations);
@@ -167,6 +195,7 @@ async function loadConfig() {
   if (!state.token) {
     els.statusText.textContent = "请输入访问口令";
     openDrawer();
+    openConnectionDialog();
     return;
   }
 
@@ -186,6 +215,7 @@ async function loadConfig() {
     }
   } catch (err) {
     els.statusText.textContent = err.message;
+    openConnectionDialog();
   }
 }
 
@@ -478,6 +508,24 @@ function closeDrawer() {
   els.drawer.setAttribute("aria-hidden", "true");
 }
 
+function openConnectionDialog() {
+  els.gatewayInput.value = state.gatewayBaseUrl;
+  els.tokenInput.value = state.token;
+  if (!els.connectionDialog.open) {
+    els.connectionDialog.showModal();
+  }
+}
+
+function renderConnectionSummary() {
+  const hasGateway = Boolean(state.gatewayBaseUrl);
+  const hasToken = Boolean(state.token);
+  if (!hasToken) {
+    els.connectionSummary.textContent = "需要输入访问口令";
+    return;
+  }
+  els.connectionSummary.textContent = hasGateway ? "使用自定义网关地址" : "使用当前网页链接";
+}
+
 async function api(path, options = {}) {
   const headers = { authorization: `Bearer ${state.token}` };
   let body;
@@ -487,7 +535,10 @@ async function api(path, options = {}) {
   }
   const res = await fetch(apiUrl(path), { method: options.method || "GET", headers, body });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+  if (!res.ok) {
+    if (res.status === 401) openConnectionDialog();
+    throw new Error(data.error || `HTTP ${res.status}`);
+  }
   return data;
 }
 

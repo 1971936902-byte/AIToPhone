@@ -1,8 +1,0 @@
-{
-  "appId": "com.aitophone.app",
-  "appName": "AIToPhone",
-  "webDir": "public",
-  "server": {
-    "cleartext": true
-  }
-}

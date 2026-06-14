@@ -9,7 +9,7 @@
     <meta name="theme-color" content="#1f6f78" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/icon.svg" />
-    <link rel="stylesheet" href="/styles.css?v=8" />
+    <link rel="stylesheet" href="/styles.css?v=9" />
     <title>AIToPhone</title>
   </head>
   <body>
@@ -35,20 +35,14 @@
           <div id="usageCard" class="usage-card"></div>
         </section>
 
-        <section class="drawer-section">
-          <label for="gatewayInput">网关地址</label>
-          <div class="token-row">
-            <input id="gatewayInput" type="url" inputmode="url" placeholder="http://电脑虚拟IP:8787" />
-            <button id="saveGatewayBtn">保存</button>
+        <section class="drawer-section connection-card">
+          <div>
+            <strong>连接状态</strong>
+            <span id="connectionSummary">使用当前网页链接</span>
           </div>
-          <p class="hint">网页版可留空；iOS App 内请填写蒲公英/Tailscale 地址。</p>
-        </section>
-
-        <section class="drawer-section">
-          <label for="tokenInput">访问口令</label>
-          <div class="token-row">
-            <input id="tokenInput" type="password" autocomplete="current-password" placeholder="AUTH_TOKEN" />
-            <button id="saveTokenBtn">保存</button>
+          <div class="title-actions">
+            <button id="openConnectionBtn" class="ghost-btn" type="button">连接设置</button>
+            <button id="openHelpBtn" class="ghost-btn" type="button">帮助</button>
           </div>
         </section>
 
@@ -95,7 +89,80 @@
         </div>
         <pre id="limitsOutput"></pre>
       </dialog>
+
+      <dialog id="connectionDialog">
+        <div class="dialog-head">
+          <h2>连接设置</h2>
+          <button id="closeConnectionBtn" class="icon-btn">×</button>
+        </div>
+        <div class="dialog-body">
+          <label for="gatewayInput">网关地址</label>
+          <div class="token-row">
+            <input id="gatewayInput" type="url" inputmode="url" placeholder="http://电脑虚拟IP:8787" />
+            <button id="saveGatewayBtn">保存</button>
+          </div>
+          <p class="hint">普通网页登录可留空；如果通过反向代理或自定义域名访问，可填写完整网关地址。</p>
+
+          <label for="tokenInput">访问口令</label>
+          <div class="token-row">
+            <input id="tokenInput" type="password" autocomplete="current-password" placeholder="AUTH_TOKEN" />
+            <button id="saveTokenBtn">保存</button>
+          </div>
+          <button id="clearLoginBtn" class="danger-btn" type="button">清除本机登录信息</button>
+        </div>
+      </dialog>
+
+      <dialog id="helpDialog">
+        <div class="dialog-head">
+          <h2>使用帮助</h2>
+          <button id="closeHelpBtn" class="icon-btn">×</button>
+        </div>
+        <div class="help-content">
+          <section>
+            <h3>1. 下载和配置 CodeX CLI</h3>
+            <ol>
+              <li>在 Windows 上安装 Node.js LTS，并确认 PowerShell 能运行 <code>node -v</code> 和 <code>npm -v</code>。</li>
+              <li>安装或更新 CodeX CLI，保证命令行里能运行 <code>codex.cmd</code>。</li>
+              <li>登录 CodeX 账号，并先在电脑端确认 CodeX 可以正常打开项目目录。</li>
+              <li>启动本机 app-server：<code>codex.cmd app-server --listen ws://127.0.0.1:4500</code>。</li>
+            </ol>
+          </section>
+          <section>
+            <h3>2. 通过贝锐蒲公英配网</h3>
+            <ol>
+              <li>在 Windows 电脑和 iPhone 上登录同一个蒲公英账号或同一个组网。</li>
+              <li>确认手机能看到电脑设备，并记下电脑的蒲公英虚拟 IP。</li>
+              <li>Windows 防火墙允许 Node.js 或网关端口被蒲公英网络访问；默认端口是 <code>8787</code>，可在 <code>.env</code> 的 <code>PORT</code> 中修改。</li>
+              <li>手机和电脑无需暴露公网，只通过蒲公英虚拟局域网访问。</li>
+            </ol>
+          </section>
+          <section>
+            <h3>3. 启动 AIToPhone 网关</h3>
+            <ol>
+              <li>在本项目目录运行 <code>powershell -ExecutionPolicy Bypass -File .\scripts\restart-server.ps1</code>。</li>
+              <li>脚本会输出可访问链接，其中蒲公英/Tailscale/局域网地址都可以用于手机访问。</li>
+              <li>如果网页显示未连接，先确认 CodeX app-server 和 AIToPhone 网关都在运行。</li>
+            </ol>
+          </section>
+          <section>
+            <h3>4. 获取网页链接</h3>
+            <ol>
+              <li>优先使用脚本输出的完整链接，格式类似 <code>http://电脑虚拟IP:端口/?token=访问口令</code>。</li>
+              <li>在 iPhone Safari 打开该链接，确认能进入聊天页后可添加到主屏幕。</li>
+              <li>链接生成后通常不需要再改；只有端口、虚拟 IP 或访问口令变化时才需要重新获取。</li>
+            </ol>
+          </section>
+          <section>
+            <h3>5. 项目和对话</h3>
+            <ol>
+              <li>进入侧边栏，点击「刷新」同步电脑上的项目目录。</li>
+              <li>选择项目后点击「新建」，即可在对应目录开启 CodeX 对话。</li>
+              <li>历史对话会保存在本机 <code>data/</code> 目录，不会提交到 GitHub。</li>
+            </ol>
+          </section>
+        </div>
+      </dialog>
     </main>
-    <script src="/app.js?v=8" type="module"></script>
+    <script src="/app.js?v=9" type="module"></script>
   </body>
 </html>

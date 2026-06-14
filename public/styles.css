@@ -346,6 +346,29 @@ h2 {
   gap: 8px;
 }
 
+.connection-card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.72);
+  padding: 10px;
+}
+
+.connection-card strong,
+.connection-card span {
+  display: block;
+}
+
+.connection-card strong {
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.connection-card span {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .hint {
   color: var(--muted);
   font-size: 12px;
@@ -441,6 +464,13 @@ select {
   background: #fff;
   color: var(--accent);
   padding: 0 10px;
+}
+
+.danger-btn {
+  width: 100%;
+  border: 1px solid rgba(217, 79, 48, 0.28);
+  background: #fff;
+  color: var(--accent-2);
 }
 
 .conversation-list {
@@ -558,6 +588,7 @@ select {
 
 dialog {
   width: min(92vw, 520px);
+  max-height: min(82vh, 720px);
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 14px;
@@ -575,6 +606,59 @@ dialog pre {
   white-space: pre-wrap;
   word-break: break-word;
   font-size: 13px;
+}
+
+.dialog-body,
+.help-content {
+  display: grid;
+  gap: 12px;
+}
+
+.help-content {
+  max-height: 64vh;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.help-content section {
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 12px;
+}
+
+.help-content section:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.help-content h3 {
+  margin: 0 0 8px;
+  color: var(--ink);
+  font-size: 14px;
+}
+
+.help-content ol {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.help-content li {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.help-content li + li {
+  margin-top: 5px;
+}
+
+.help-content code {
+  border: 1px solid rgba(31, 111, 120, 0.16);
+  border-radius: 5px;
+  background: rgba(31, 111, 120, 0.06);
+  color: var(--ink);
+  padding: 1px 4px;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 0.9em;
 }
 
 @media (min-width: 900px) {
