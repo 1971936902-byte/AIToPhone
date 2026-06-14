@@ -17,6 +17,7 @@ const state = {
   syncPollTimer: null,
   syncPollRunning: false,
   messageNodes: new Map(),
+  pendingThinking: new Map(),
   attachments: [],
   accountSnapshot: null
 };
@@ -178,14 +179,23 @@ els.composer.addEventListener("submit", async (event) => {
   const attachments = [...state.attachments];
   clearAttachments();
   autosizeInput();
+  const threadId = state.threadId;
+  const optimisticId = `local_user_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  upsertMessage({ id: optimisticId, threadId, role: "user", text, attachments });
+  addPendingThinking(threadId);
   setBusy(true);
   try {
-    const data = await api(`/api/threads/${encodeURIComponent(state.threadId)}/messages`, {
+    const data = await api(`/api/threads/${encodeURIComponent(threadId)}/messages`, {
       method: "POST",
       body: { text, attachments }
     });
-    if (data.message) upsertMessage(data.message);
+    if (data.message) {
+      removeMessageNode(optimisticId);
+      upsertMessage(data.message);
+    }
   } catch (err) {
+    removeMessageNode(optimisticId);
+    removePendingThinking(threadId);
     addSystemMessage(err.message);
   } finally {
     setBusy(false);
@@ -300,11 +310,17 @@ function connectEvents() {
     }
     if (frame.type === "message") {
       await loadSync();
-      if (payload.threadId === state.threadId) upsertMessage(payload.message);
+      if (payload.threadId === state.threadId) {
+        if (payload.message?.role === "agent") removePendingThinking(payload.threadId);
+        upsertMessage(payload.message);
+      }
       return;
     }
     if (frame.type === "turn-complete") {
-      if (payload.threadId === state.threadId) setBusy(false);
+      if (payload.threadId === state.threadId) {
+        removePendingThinking(payload.threadId);
+        setBusy(false);
+      }
       return;
     }
     if (payload.type === "status") return renderStatus(payload.status);
@@ -521,6 +537,7 @@ async function selectThread(threadId, options = {}) {
     state.threadId = threadId;
     if (data.thread.projectId) setSelectedProject(data.thread.projectId, { render: false });
     state.messageNodes.clear();
+    state.pendingThinking.clear();
     localStorage.setItem("aitophone_thread", threadId);
     els.chatTitle.textContent = data.thread.title || data.thread.projectName || "AIToPhone";
     renderMessages(data.messages || []);
@@ -533,6 +550,7 @@ async function selectThread(threadId, options = {}) {
 function renderMessages(messages) {
   els.messages.innerHTML = "";
   state.messageNodes.clear();
+  state.pendingThinking.clear();
   if (messages.length === 0) return renderEmpty("这段对话还没有消息。");
   for (const message of messages) upsertMessage(message);
 }
@@ -542,6 +560,7 @@ function upsertMessage(message) {
   if (existing) return fillMessage(existing, message);
   const node = document.createElement("article");
   node.className = `bubble-row ${message.role}`;
+  node.classList.toggle("pending", Boolean(message.pending));
   node.dataset.messageId = message.id;
   const avatar = message.role === "user" ? "我" : message.role === "agent" ? "AI" : "!";
   node.innerHTML = `<div class="avatar">${avatar}</div><div class="bubble"></div>`;
@@ -555,9 +574,32 @@ function upsertMessage(message) {
 
 function fillMessage(node, message) {
   const bubble = node.querySelector(".bubble");
-  if (message.role === "agent") bubble.innerHTML = renderMarkdown(linkifyFiles(message.text || ""));
+  node.classList.toggle("pending", Boolean(message.pending));
+  if (message.pending) bubble.innerHTML = `<span class="thinking-text">${escapeHtml(message.text || "思考中...")}</span>`;
+  else if (message.role === "agent") bubble.innerHTML = renderMarkdown(linkifyFiles(message.text || ""));
   else bubble.innerHTML = `${escapeHtml(message.text || "").replace(/\n/g, "<br>")}${renderAttachments(message.attachments || [])}`;
   els.messages.scrollTop = els.messages.scrollHeight;
+}
+
+function addPendingThinking(threadId) {
+  removePendingThinking(threadId);
+  const id = `thinking_${threadId}_${Date.now()}`;
+  state.pendingThinking.set(threadId, id);
+  upsertMessage({ id, threadId, role: "agent", text: "思考中...", pending: true });
+}
+
+function removePendingThinking(threadId) {
+  const id = state.pendingThinking.get(threadId);
+  if (!id) return;
+  removeMessageNode(id);
+  state.pendingThinking.delete(threadId);
+}
+
+function removeMessageNode(messageId) {
+  const node = state.messageNodes.get(messageId);
+  if (!node) return;
+  node.remove();
+  state.messageNodes.delete(messageId);
 }
 
 function renderAttachments(attachments) {
