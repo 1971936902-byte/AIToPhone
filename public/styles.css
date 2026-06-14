@@ -500,6 +500,12 @@ select {
   padding: 6px;
 }
 
+.project-group.selected {
+  border-color: rgba(31, 111, 120, 0.56);
+  background: var(--agent);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
 .project-group summary {
   display: flex;
   align-items: center;
@@ -550,6 +556,10 @@ select {
   background: var(--agent);
   color: var(--accent);
   padding: 2px 7px;
+}
+
+.project-group.selected summary small {
+  background: #fff;
 }
 
 .project-actions {

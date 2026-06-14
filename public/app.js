@@ -10,6 +10,7 @@ const state = {
     "",
   projects: [],
   conversations: [],
+  projectId: localStorage.getItem("aitophone_project") || "",
   threadId: localStorage.getItem("aitophone_thread") || localStorage.getItem("callcodex_thread") || "",
   ws: null,
   messageNodes: new Map(),
@@ -38,7 +39,6 @@ const els = {
   tokenInput: document.querySelector("#tokenInput"),
   saveTokenBtn: document.querySelector("#saveTokenBtn"),
   clearLoginBtn: document.querySelector("#clearLoginBtn"),
-  projectSelect: document.querySelector("#projectSelect"),
   conversationList: document.querySelector("#conversationList"),
   newThreadBtn: document.querySelector("#newThreadBtn"),
   messages: document.querySelector("#messages"),
@@ -63,6 +63,8 @@ const els = {
   newProjectPath: document.querySelector("#newProjectPath"),
   createProjectBtn: document.querySelector("#createProjectBtn")
 };
+
+initViewportSizing();
 
 els.tokenInput.value = state.token;
 els.gatewayInput.value = state.gatewayBaseUrl;
@@ -107,15 +109,12 @@ els.clearLoginBtn.addEventListener("click", () => {
   els.statusText.textContent = "请重新输入访问口令";
 });
 
-els.projectSelect.addEventListener("change", renderConversations);
-
-
 els.newThreadBtn.addEventListener("click", () => {
   els.newDialog.showModal();
 });
 
 els.createThreadBtn.addEventListener("click", async () => {
-  const projectId = els.projectSelect.value;
+  const projectId = selectedProjectId();
   if (!projectId) return;
   try {
     await createThreadForProject(projectId);
@@ -143,7 +142,7 @@ els.createProjectBtn.addEventListener("click", async () => {
     els.newProjectName.value = "";
     els.newProjectPath.value = "";
     await loadSync();
-    if (data.project?.id) els.projectSelect.value = data.project.id;
+    if (data.project?.id) setSelectedProject(data.project.id, { render: false });
     if (data.thread?.threadId) await selectThread(data.thread.threadId);
     els.newDialog.close();
     closeDrawer();
@@ -368,25 +367,19 @@ function applySyncPayload(payload, reason = "", frame = {}) {
 }
 
 function renderProjects() {
-  const selected = els.projectSelect.value;
-  els.projectSelect.innerHTML = "";
-  for (const project of state.projects) {
-    const option = document.createElement("option");
-    option.value = project.id;
-    option.textContent = `${project.name} · ${baseName(project.cwd)}`;
-    els.projectSelect.append(option);
+  if (state.projectId && state.projects.some((project) => project.id === state.projectId)) {
+    return;
   }
-  if (selected && state.projects.some((project) => project.id === selected)) {
-    els.projectSelect.value = selected;
-  }
+  setSelectedProject(state.projects[0]?.id || "", { render: false });
 }
 
 function renderConversations() {
   els.conversationList.innerHTML = "";
   for (const group of state.conversations) {
     const section = document.createElement("details");
-    section.className = "project-group";
-    section.open = group.id === (els.projectSelect.value || state.projects[0]?.id);
+    const selected = group.id === selectedProjectId();
+    section.className = `project-group${selected ? " selected" : ""}`;
+    section.open = selected;
     section.innerHTML = `
       <summary>
         <span>
@@ -396,6 +389,10 @@ function renderConversations() {
         <small>${group.threads?.length || 0}</small>
       </summary>
     `;
+    section.querySelector("summary").addEventListener("click", (event) => {
+      event.preventDefault();
+      setSelectedProject(group.id);
+    });
     const actions = document.createElement("div");
     actions.className = "project-actions";
     const create = document.createElement("button");
@@ -436,7 +433,7 @@ async function createThreadForProject(projectId) {
   try {
     const data = await api("/api/threads", { method: "POST", body: { projectId } });
     await loadSync();
-    if (projectId) els.projectSelect.value = projectId;
+    if (projectId) setSelectedProject(projectId, { render: false });
     await selectThread(data.thread.threadId);
     return data;
   } finally {
@@ -449,6 +446,10 @@ async function deleteProject(projectId) {
     await api(`/api/projects/${encodeURIComponent(projectId)}`, { method: "DELETE" });
     if (state.projects.some((project) => project.id === projectId)) {
       state.threadId = "";
+      if (state.projectId === projectId) {
+        const nextProject = state.projects.find((project) => project.id !== projectId);
+        setSelectedProject(nextProject?.id || "", { render: false });
+      }
       localStorage.removeItem("aitophone_thread");
       els.chatTitle.textContent = "AIToPhone";
       renderEmpty("\u8bf7\u9009\u62e9\u9879\u76ee\u540e\u65b0\u5efa\u6216\u6253\u5f00\u5bf9\u8bdd");
@@ -505,6 +506,7 @@ async function selectThread(threadId, options = {}) {
   try {
     const data = await api(`/api/threads/${encodeURIComponent(threadId)}`);
     state.threadId = threadId;
+    if (data.thread.projectId) setSelectedProject(data.thread.projectId, { render: false });
     state.messageNodes.clear();
     localStorage.setItem("aitophone_thread", threadId);
     els.chatTitle.textContent = data.thread.title || data.thread.projectName || "AIToPhone";
@@ -718,6 +720,17 @@ function firstThread() {
   return null;
 }
 
+function selectedProjectId() {
+  return state.projectId || state.projects[0]?.id || "";
+}
+
+function setSelectedProject(projectId, options = {}) {
+  state.projectId = projectId || "";
+  if (state.projectId) localStorage.setItem("aitophone_project", state.projectId);
+  else localStorage.removeItem("aitophone_project");
+  if (options.render !== false) renderConversations();
+}
+
 function formatTime(value) {
   if (!value) return "";
   const date = new Date(value);
@@ -727,6 +740,33 @@ function formatTime(value) {
 
 function compactNumber(value) {
   return Intl.NumberFormat(undefined, { notation: "compact" }).format(value);
+}
+
+function initViewportSizing() {
+  const viewport = window.visualViewport;
+  let frame = 0;
+
+  const sync = () => {
+    cancelAnimationFrame(frame);
+    frame = requestAnimationFrame(() => {
+      const height = viewport?.height || window.innerHeight;
+      document.documentElement.style.setProperty("--app-height", `${Math.round(height)}px`);
+      window.scrollTo(0, 0);
+
+      if (document.activeElement === els.messageInput) {
+        els.messages.scrollTop = els.messages.scrollHeight;
+        els.composer.scrollIntoView({ block: "end" });
+      }
+    });
+  };
+
+  sync();
+  window.addEventListener("resize", sync);
+  window.addEventListener("orientationchange", () => setTimeout(sync, 250));
+  viewport?.addEventListener("resize", sync);
+  viewport?.addEventListener("scroll", sync);
+  els.messageInput.addEventListener("focus", () => setTimeout(sync, 80));
+  els.messageInput.addEventListener("blur", () => setTimeout(sync, 120));
 }
 
 function autosizeInput() {
