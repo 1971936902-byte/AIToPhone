@@ -19,6 +19,7 @@ const state = {
   syncPollRunning: false,
   messageNodes: new Map(),
   pendingThinking: new Map(),
+  pendingUserMessages: new Map(),
   attachments: [],
   scheduleDraftAttachments: [],
   scheduledMessages: [],
@@ -200,6 +201,7 @@ els.composer.addEventListener("submit", async (event) => {
   autosizeInput();
   const threadId = state.threadId;
   const optimisticId = `local_user_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  state.pendingUserMessages.set(threadId, optimisticId);
   upsertMessage({ id: optimisticId, threadId, role: "user", text, attachments });
   addPendingThinking(threadId);
   setBusy(true);
@@ -209,10 +211,10 @@ els.composer.addEventListener("submit", async (event) => {
       body: { text, attachments }
     });
     if (data.message) {
-      removeMessageNode(optimisticId);
-      upsertMessage(data.message);
+      confirmUserMessage(threadId, data.message);
     }
   } catch (err) {
+    state.pendingUserMessages.delete(threadId);
     removeMessageNode(optimisticId);
     removePendingThinking(threadId);
     restoreComposerDraft(text, attachments);
@@ -332,6 +334,10 @@ function connectEvents() {
       await loadSync();
       if (payload.threadId === state.threadId) {
         if (payload.message?.role === "agent") removePendingThinking(payload.threadId);
+        if (payload.message?.role === "user" && state.pendingUserMessages.has(payload.threadId)) {
+          confirmUserMessage(payload.threadId, payload.message);
+          return;
+        }
         upsertMessage(payload.message);
       }
       return;
@@ -576,6 +582,7 @@ function renderMessages(messages) {
   els.messages.innerHTML = "";
   state.messageNodes.clear();
   state.pendingThinking.clear();
+  state.pendingUserMessages.clear();
   if (messages.length === 0) return renderEmpty("这段对话还没有消息。");
   for (const message of messages) upsertMessage(message);
 }
@@ -595,6 +602,29 @@ function upsertMessage(message) {
   els.messages.append(node);
   state.messageNodes.set(message.id, node);
   els.messages.scrollTop = els.messages.scrollHeight;
+}
+
+function confirmUserMessage(threadId, message) {
+  const optimisticId = state.pendingUserMessages.get(threadId);
+  state.pendingUserMessages.delete(threadId);
+  if (optimisticId) {
+    replaceMessageNode(optimisticId, message);
+    return;
+  }
+  upsertMessage(message);
+}
+
+function replaceMessageNode(oldId, message) {
+  const node = state.messageNodes.get(oldId);
+  if (!node) {
+    upsertMessage(message);
+    return;
+  }
+  state.messageNodes.delete(oldId);
+  state.messageNodes.set(message.id, node);
+  node.dataset.messageId = message.id;
+  node.className = `bubble-row ${message.role}`;
+  fillMessage(node, message);
 }
 
 function fillMessage(node, message) {

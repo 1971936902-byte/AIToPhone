@@ -50,7 +50,9 @@ test("Send flow immediately renders user text and pending assistant state", () =
   assert.match(app, /upsertMessage\(\{ id: optimisticId, threadId, role: "user"/);
   assert.match(app, /addPendingThinking\(threadId\)/);
   assert.match(app, /if \(data\.message\) \{/);
-  assert.match(app, /removeMessageNode\(optimisticId\)/);
+  assert.match(app, /pendingUserMessages\.set\(threadId, optimisticId\)/);
+  assert.match(app, /confirmUserMessage\(threadId, data\.message\)/);
+  assert.match(app, /function replaceMessageNode\(oldId, message\)/);
   assert.match(app, /removePendingThinking\(payload\.threadId\)/);
 });
 
