@@ -64,6 +64,21 @@ export class ConversationStore {
     return this.threads.get(threadId);
   }
 
+  deleteThread(threadId) {
+    const existed = this.threads.delete(threadId);
+    if (!existed) {
+      return false;
+    }
+
+    for (const [messageId, message] of this.messages.entries()) {
+      if (message.threadId === threadId) {
+        this.messages.delete(messageId);
+      }
+    }
+    this.save();
+    return true;
+  }
+
   getMessages(threadId) {
     return [...this.messages.values()]
       .filter((message) => message.threadId === threadId)

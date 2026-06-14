@@ -29,7 +29,7 @@ const els = {
   accountName: document.querySelector("#accountName"),
   accountPlan: document.querySelector("#accountPlan"),
   usageCard: document.querySelector("#usageCard"),
-  refreshAccountBtn: document.querySelector("#refreshAccountBtn"),
+  syncIndicator: document.querySelector("#syncIndicator"),
   connectionSummary: document.querySelector("#connectionSummary"),
   openConnectionBtn: document.querySelector("#openConnectionBtn"),
   openHelpBtn: document.querySelector("#openHelpBtn"),
@@ -40,7 +40,6 @@ const els = {
   clearLoginBtn: document.querySelector("#clearLoginBtn"),
   projectSelect: document.querySelector("#projectSelect"),
   conversationList: document.querySelector("#conversationList"),
-  refreshProjectsBtn: document.querySelector("#refreshProjectsBtn"),
   newThreadBtn: document.querySelector("#newThreadBtn"),
   messages: document.querySelector("#messages"),
   composer: document.querySelector("#composer"),
@@ -67,7 +66,6 @@ renderConnectionSummary();
 els.openDrawerBtn.addEventListener("click", openDrawer);
 els.closeDrawerBtn.addEventListener("click", closeDrawer);
 els.scrim.addEventListener("click", closeDrawer);
-els.refreshAccountBtn.addEventListener("click", loadAccount);
 els.openConnectionBtn.addEventListener("click", openConnectionDialog);
 els.closeConnectionBtn.addEventListener("click", () => els.connectionDialog.close());
 els.openHelpBtn.addEventListener("click", () => els.helpDialog.showModal());
@@ -104,20 +102,6 @@ els.clearLoginBtn.addEventListener("click", () => {
 
 els.projectSelect.addEventListener("change", renderConversations);
 
-els.refreshProjectsBtn.addEventListener("click", async () => {
-  setProjectRefreshBusy(true);
-  try {
-    const data = await api("/api/projects/refresh", { method: "POST" });
-    state.projects = data.projects || [];
-    state.conversations = data.conversations || [];
-    renderProjects();
-    renderConversations();
-  } catch (err) {
-    addSystemMessage(`刷新项目失败：${err.message}`);
-  } finally {
-    setProjectRefreshBusy(false);
-  }
-});
 
 els.newThreadBtn.addEventListener("click", async () => {
   const projectId = els.projectSelect.value;
@@ -125,7 +109,7 @@ els.newThreadBtn.addEventListener("click", async () => {
   setBusy(true);
   try {
     const data = await api("/api/threads", { method: "POST", body: { projectId } });
-    await loadConversations();
+    await loadSync();
     await selectThread(data.thread.threadId);
     closeDrawer();
   } catch (err) {
@@ -201,12 +185,8 @@ async function loadConfig() {
 
   try {
     const data = await api("/api/config");
-    state.projects = data.projects;
-    state.conversations = data.conversations || [];
-    renderProjects();
-    renderConversations();
-    renderStatus(data.codex);
-    await loadAccount();
+    applySyncPayload(data, "config");
+    if (!data.account) await loadAccount();
 
     if (state.threadId) await selectThread(state.threadId, { silent: true });
     else {
@@ -288,10 +268,10 @@ function renderAccount(data) {
   `;
 }
 
-async function loadConversations() {
-  const data = await api("/api/conversations");
-  state.conversations = data.conversations || [];
-  renderConversations();
+async function loadSync() {
+  const data = await api("/api/config");
+  applySyncPayload(data, "config");
+  return data;
 }
 
 function connectEvents() {
@@ -300,27 +280,56 @@ function connectEvents() {
 
   const protocol = location.protocol === "https:" ? "wss:" : "ws:";
   state.ws = new WebSocket(`${eventBaseUrl(protocol)}/events?token=${encodeURIComponent(state.token)}`);
-  state.ws.addEventListener("open", () => (els.statusText.textContent = "网关已连接"));
+  state.ws.addEventListener("open", () => (els.statusText.textContent = "\u7f51\u5173\u5df2\u8fde\u63a5"));
   state.ws.addEventListener("message", async (event) => {
-    const payload = JSON.parse(event.data);
-    if (payload.type === "status") return renderStatus(payload.status);
-    if (payload.type === "thread") return loadConversations();
-    if (payload.type === "projects") {
-      state.projects = payload.projects || [];
-      state.conversations = payload.conversations || [];
-      renderProjects();
-      renderConversations();
+    const frame = JSON.parse(event.data);
+    const payload = frame.payload || frame;
+    if (frame.type === "sync") {
+      applySyncPayload(payload, frame.event, frame);
       return;
     }
+    if (payload.type === "status") return renderStatus(payload.status);
+    if (payload.type === "thread") return loadSync();
+    if (payload.type === "projects") return applySyncPayload(payload, "projects");
     if (payload.type === "message") {
-      await loadConversations();
+      await loadSync();
       if (payload.threadId === state.threadId) upsertMessage(payload.message);
       return;
     }
     if (payload.type === "turn-complete" && payload.threadId === state.threadId) setBusy(false);
-    if (payload.type === "account") renderAccount(payload.account);
+    if (payload.type === "account") {
+      state.accountSnapshot = payload.account;
+      renderAccount(payload.account);
+    }
   });
-  state.ws.addEventListener("close", () => (els.statusText.textContent = "事件连接已断开"));
+  state.ws.addEventListener("close", () => (els.statusText.textContent = "\u4e8b\u4ef6\u8fde\u63a5\u5df2\u65ad\u5f00"));
+}
+
+function applySyncPayload(payload, reason = "", frame = {}) {
+  if (!payload) return;
+  if (frame.seq && frame.seq <= (state.lastSyncSeq || 0)) return;
+  if (frame.seq) state.lastSyncSeq = frame.seq;
+
+  if (payload.codex) renderStatus(payload.codex);
+  if (Array.isArray(payload.projects)) {
+    state.projects = payload.projects;
+    renderProjects();
+  }
+  if (Array.isArray(payload.conversations)) {
+    state.conversations = payload.conversations;
+    renderConversations();
+    if (state.threadId && !threadExists(state.threadId)) {
+      state.threadId = "";
+      localStorage.removeItem("aitophone_thread");
+      els.chatTitle.textContent = "AIToPhone";
+      renderEmpty("\u8bf7\u9009\u62e9\u9879\u76ee\u540e\u65b0\u5efa\u6216\u6253\u5f00\u5bf9\u8bdd");
+    }
+  }
+  if (payload.account) {
+    state.accountSnapshot = payload.account;
+    renderAccount(payload.account);
+  }
+  renderSyncIndicator(frame.createdAt || new Date().toISOString(), reason);
 }
 
 function renderProjects() {
@@ -379,15 +388,45 @@ function renderConversations() {
 }
 
 function renderThreadButton(thread) {
-  const button = document.createElement("button");
-  button.className = `conversation-item${thread.threadId === state.threadId ? " active" : ""}`;
-  button.type = "button";
-  button.innerHTML = `<span>${escapeHtml(thread.title || thread.projectName || "New chat")}</span><small>${formatTime(thread.lastMessageAt || thread.createdAt)}</small>`;
-  button.addEventListener("click", async () => {
+  const item = document.createElement("div");
+  item.className = `conversation-item${thread.threadId === state.threadId ? " active" : ""}`;
+
+  const open = document.createElement("button");
+  open.className = "conversation-open";
+  open.type = "button";
+  open.innerHTML = `<span>${escapeHtml(thread.title || thread.projectName || "New chat")}</span><small>${formatTime(thread.lastMessageAt || thread.createdAt)}</small>`;
+  open.addEventListener("click", async () => {
     await selectThread(thread.threadId);
     closeDrawer();
   });
-  return button;
+
+  const remove = document.createElement("button");
+  remove.className = "thread-delete";
+  remove.type = "button";
+  remove.title = "\u5220\u9664\u5bf9\u8bdd";
+  remove.textContent = "\u00d7";
+  remove.addEventListener("click", async () => {
+    if (!confirm("\u5220\u9664\u8fd9\u6bb5\u5bf9\u8bdd\uff1f")) return;
+    await deleteThread(thread.threadId);
+  });
+
+  item.append(open, remove);
+  return item;
+}
+
+async function deleteThread(threadId) {
+  try {
+    await api(`/api/threads/${encodeURIComponent(threadId)}`, { method: "DELETE" });
+    if (state.threadId === threadId) {
+      state.threadId = "";
+      localStorage.removeItem("aitophone_thread");
+      els.chatTitle.textContent = "AIToPhone";
+      renderEmpty("\u8bf7\u9009\u62e9\u9879\u76ee\u540e\u65b0\u5efa\u6216\u6253\u5f00\u5bf9\u8bdd");
+    }
+    await loadSync();
+  } catch (err) {
+    addSystemMessage(err.message);
+  }
 }
 
 async function selectThread(threadId, options = {}) {
@@ -628,9 +667,14 @@ function setBusy(busy) {
   els.newThreadBtn.disabled = busy;
 }
 
-function setProjectRefreshBusy(busy) {
-  els.refreshProjectsBtn.disabled = busy;
-  els.refreshProjectsBtn.textContent = busy ? "刷新中" : "刷新";
+function renderSyncIndicator(value, reason = "") {
+  if (!els.syncIndicator) return;
+  els.syncIndicator.textContent = `\u540c\u6b65 ${formatTime(value)}`;
+  els.syncIndicator.title = reason ? `\u81ea\u52a8\u540c\u6b65\uff1a${reason}` : "\u81ea\u52a8\u540c\u6b65";
+}
+
+function threadExists(threadId) {
+  return state.conversations.some((group) => (group.threads || []).some((thread) => thread.threadId === threadId));
 }
 
 function baseName(filePath) {

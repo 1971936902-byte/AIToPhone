@@ -403,6 +403,18 @@ h2 {
   font-size: 12px;
 }
 
+.sync-indicator {
+  justify-self: end;
+  border: 1px solid rgba(31, 111, 120, 0.18);
+  border-radius: 999px;
+  background: var(--agent);
+  color: var(--accent);
+  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
 .usage-card {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -547,12 +559,14 @@ select {
 .conversation-item {
   min-height: 56px;
   display: grid;
-  gap: 4px;
-  justify-items: start;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: stretch;
+  gap: 6px;
   border: 1px solid var(--line);
+  border-radius: 8px;
   background: #fff;
   color: var(--ink);
-  padding: 9px 10px;
+  padding: 0;
   text-align: left;
 }
 
@@ -585,14 +599,40 @@ select {
   background: var(--agent);
 }
 
-.conversation-item span {
+.conversation-open {
+  min-height: 54px;
+  display: grid;
+  gap: 4px;
+  justify-items: start;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink);
+  padding: 9px 10px;
+  text-align: left;
+}
+
+.conversation-open span {
   width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.conversation-item small,
+.thread-delete {
+  width: 34px;
+  min-height: 34px;
+  align-self: center;
+  margin-right: 6px;
+  border: 1px solid rgba(217, 79, 48, 0.18);
+  border-radius: 50%;
+  background: #fff;
+  color: var(--accent-2);
+  padding: 0;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.conversation-open small,
 .drawer-empty {
   color: var(--muted);
   font-size: 12px;

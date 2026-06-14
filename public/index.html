@@ -30,7 +30,7 @@
               <strong id="accountName">账户未读取</strong>
               <span id="accountPlan">点击刷新账户信息</span>
             </div>
-            <button id="refreshAccountBtn" class="ghost-btn">刷新</button>
+            <span id="syncIndicator" class="sync-indicator">自动</span>
           </div>
           <div id="usageCard" class="usage-card"></div>
         </section>
@@ -50,7 +50,6 @@
           <div class="section-title">
             <span>项目和对话</span>
             <div class="title-actions">
-              <button id="refreshProjectsBtn" class="ghost-btn" type="button">刷新</button>
               <button id="newThreadBtn" class="ghost-btn" type="button">新建</button>
             </div>
           </div>
@@ -155,7 +154,7 @@
           <section>
             <h3>5. 项目和对话</h3>
             <ol>
-              <li>进入侧边栏，点击「刷新」同步电脑上的项目目录。</li>
+              <li>项目和对话会由电脑端网关秒级自动同步，并和 CodeX 桌面端项目列表保持一致。</li>
               <li>选择项目后点击「新建」，即可在对应目录开启 CodeX 对话。</li>
               <li>历史对话会保存在本机 <code>data/</code> 目录，不会提交到 GitHub。</li>
             </ol>
@@ -163,6 +162,6 @@
         </div>
       </dialog>
     </main>
-    <script src="/app.js?v=10" type="module"></script>
+    <script src="/app.js?v=11" type="module"></script>
   </body>
 </html>

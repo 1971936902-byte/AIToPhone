@@ -14,10 +14,17 @@ const uploadDir = path.resolve(process.cwd(), "uploads");
 const host = process.env.HOST || "0.0.0.0";
 const port = Number(process.env.PORT || 8787);
 const authToken = process.env.AUTH_TOKEN || "change-this-long-random-token";
+const syncIntervalMs = Number(process.env.SYNC_INTERVAL_MS || 5000);
+const accountSyncIntervalMs = Number(process.env.ACCOUNT_SYNC_INTERVAL_MS || 30000);
 let projects = loadProjects();
 const codex = new CodexAppServer();
 const clients = new Set();
 const store = new ConversationStore(projects);
+let syncSeq = 0;
+let syncTimer = null;
+let syncRunning = false;
+let accountSyncRunning = false;
+let lastAccountSyncAt = 0;
 const accountCache = {
   account: null,
   limits: null,
@@ -62,7 +69,7 @@ server.on("upgrade", (req, socket, head) => {
 
   wss.handleUpgrade(req, socket, head, (ws) => {
     clients.add(ws);
-    ws.send(JSON.stringify({ type: "status", status: codex.getStatus() }));
+    sendFrame(ws, "sync", "client-connected", buildSyncPayload());
     ws.on("close", () => clients.delete(ws));
   });
 });
@@ -74,25 +81,28 @@ codex.on("notification", (event) => {
   }
 
   if (update.kind === "turn-complete") {
-    broadcast({ type: "turn-complete", threadId: update.threadId, turnId: update.turnId });
+    broadcastFrame("turn-complete", "codex-turn-complete", { threadId: update.threadId, turnId: update.turnId });
+    broadcastSync("turn-complete");
     return;
   }
 
   const message = store.upsertAgentMessage(update);
-  broadcast({ type: "message", threadId: update.threadId, message });
+  broadcastFrame("message", "codex-message", { threadId: update.threadId, message });
+  broadcastSync("message");
 });
 
 codex.on("status", (status) => {
-  broadcast({ type: "status", status });
+  broadcastSync("codex-status", { codex: status });
 });
 
 codex.on("log", (entry) => {
-  broadcast({ type: "log", entry });
+  broadcastFrame("log", "codex-log", { entry });
 });
 
 server.listen(port, host, () => {
   console.log(`AIToPhone listening on http://${host}:${port}`);
   console.log("Open this from iPhone through Tailscale: http://WINDOWS_TAILSCALE_IP:" + port + "/?token=AUTH_TOKEN");
+  startSyncLoop();
 });
 
 async function handleApi(req, res, url) {
@@ -100,7 +110,8 @@ async function handleApi(req, res, url) {
     return sendJson(res, 200, {
       codex: codex.getStatus(),
       projects: publicProjects(projects),
-      conversations: store.listConversations()
+      conversations: store.listConversations(),
+      account: buildAccountSnapshotFromCache()
     });
   }
 
@@ -115,7 +126,7 @@ async function handleApi(req, res, url) {
       projects: publicProjects(projects),
       conversations: store.listConversations()
     };
-    broadcast({ type: "projects", ...payload });
+    broadcastSync("projects-refresh", payload);
     return sendJson(res, 200, payload);
   }
 
@@ -162,11 +173,21 @@ async function handleApi(req, res, url) {
       createdAt: new Date().toISOString()
     };
     store.createThread(thread);
-    broadcast({ type: "thread", thread });
+    broadcastSync("thread-created", { thread });
     return sendJson(res, 200, { thread, result });
   }
 
   const threadMatch = url.pathname.match(/^\/api\/threads\/([^/]+)$/);
+  if (req.method === "DELETE" && threadMatch) {
+    const threadId = decodeURIComponent(threadMatch[1]);
+    const deleted = store.deleteThread(threadId);
+    if (!deleted) {
+      return sendJson(res, 404, { error: "Thread not found" });
+    }
+    broadcastSync("thread-deleted", { threadId });
+    return sendJson(res, 200, { ok: true, threadId });
+  }
+
   if (req.method === "GET" && threadMatch) {
     const threadId = decodeURIComponent(threadMatch[1]);
     const thread = store.getThread(threadId);
@@ -191,7 +212,8 @@ async function handleApi(req, res, url) {
 
     const messageText = buildMessageText(text, attachments);
     const message = store.addMessage({ threadId, role: "user", text: messageText, attachments });
-    broadcast({ type: "message", threadId, message });
+    broadcastFrame("message", "user-message", { threadId, message });
+    broadcastSync("user-message");
     const result = await codex.sendMessage({ threadId, text: messageText, attachments });
     return sendJson(res, 200, { message, result });
   }
@@ -379,6 +401,93 @@ function withTimeout(promise, ms, message) {
     promise,
     new Promise((_, reject) => setTimeout(() => reject(new Error(message)), ms))
   ]);
+}
+
+function startSyncLoop() {
+  if (syncTimer) {
+    return;
+  }
+  runSyncTick("startup");
+  syncTimer = setInterval(() => runSyncTick("interval"), syncIntervalMs);
+}
+
+async function runSyncTick(reason) {
+  if (syncRunning) {
+    return;
+  }
+  syncRunning = true;
+  try {
+    projects = refreshProjects(projects);
+    store.setProjects(projects);
+    await maybeRefreshAccount();
+    broadcastSync(reason);
+  } catch (err) {
+    broadcastSync("sync-error", { error: err.message || String(err) });
+  } finally {
+    syncRunning = false;
+  }
+}
+
+async function maybeRefreshAccount() {
+  const now = Date.now();
+  if (accountSyncRunning || now - lastAccountSyncAt < accountSyncIntervalMs) {
+    return;
+  }
+  accountSyncRunning = true;
+  try {
+    await readAccountSnapshot();
+    lastAccountSyncAt = Date.now();
+  } catch {
+    lastAccountSyncAt = Date.now();
+  } finally {
+    accountSyncRunning = false;
+  }
+}
+
+function buildSyncPayload(extra = {}) {
+  return {
+    codex: codex.getStatus(),
+    projects: publicProjects(projects),
+    conversations: store.listConversations(),
+    account: buildAccountSnapshotFromCache(),
+    ...extra
+  };
+}
+
+function buildAccountSnapshotFromCache() {
+  return {
+    account: accountCache.account || readLocalAccountHint(),
+    limits: accountCache.limits,
+    usage: accountCache.usage,
+    errors: {},
+    stale: false,
+    updatedAt: accountCache.updatedAt
+  };
+}
+
+function makeFrame(type, event, payload = {}) {
+  return {
+    v: 1,
+    type,
+    event,
+    seq: ++syncSeq,
+    createdAt: new Date().toISOString(),
+    payload
+  };
+}
+
+function broadcastSync(event, extra = {}) {
+  broadcast(makeFrame("sync", event, buildSyncPayload(extra)));
+}
+
+function broadcastFrame(type, event, payload = {}) {
+  broadcast(makeFrame(type, event, payload));
+}
+
+function sendFrame(ws, type, event, payload = {}) {
+  if (ws.readyState === 1) {
+    ws.send(JSON.stringify(makeFrame(type, event, payload)));
+  }
 }
 
 function readLocalAccountHint() {
