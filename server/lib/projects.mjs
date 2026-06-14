@@ -7,21 +7,17 @@ const LOCAL_PROJECT_FILE = path.join(process.cwd(), "data", "projects.local.json
 
 export function loadProjects() {
   const file = fs.existsSync(LOCAL_PROJECT_FILE) ? LOCAL_PROJECT_FILE : DEFAULT_PROJECT_FILE;
-  const data = JSON.parse(fs.readFileSync(file, "utf8"));
-  const projects = Array.isArray(data.projects) ? data.projects : [];
-
-  return projects.map((project) => ({
-    id: String(project.id),
-    name: String(project.name),
-    cwd: path.resolve(String(project.cwd))
-  }));
+  return loadProjectsFromFile(file);
 }
 
 export function refreshProjects(currentProjects = []) {
+  const defaultProjects = loadProjectsFromFile(DEFAULT_PROJECT_FILE);
+  const knownProjects = [...defaultProjects, ...currentProjects];
+  const codexDesktopProjects = discoverCodexDesktopProjects();
+  const discoveredProjects = codexDesktopProjects.length > 0 ? codexDesktopProjects : discoverCodexSessionProjects();
   const merged = mergeProjects([
-    ...currentProjects,
-    ...discoverCodexSessionProjects(),
-    ...discoverLocalProjectDirs()
+    ...applyKnownIds(discoveredProjects, knownProjects),
+    ...defaultProjects
   ]);
   saveProjects(merged);
   return merged;
@@ -51,6 +47,20 @@ function saveProjects(projects) {
   fs.writeFileSync(LOCAL_PROJECT_FILE, JSON.stringify(payload, null, 2), "utf8");
 }
 
+function loadProjectsFromFile(file) {
+  if (!fs.existsSync(file)) {
+    return [];
+  }
+  const data = JSON.parse(fs.readFileSync(file, "utf8"));
+  const projects = Array.isArray(data.projects) ? data.projects : [];
+
+  return projects.map((project) => ({
+    id: String(project.id),
+    name: String(project.name),
+    cwd: path.resolve(String(project.cwd))
+  }));
+}
+
 function mergeProjects(projects) {
   const byPath = new Map();
   for (const project of projects) {
@@ -65,7 +75,67 @@ function mergeProjects(projects) {
       });
     }
   }
-  return [...byPath.values()].sort((a, b) => a.name.localeCompare(b.name, "zh-CN"));
+  return [...byPath.values()];
+}
+
+function applyKnownIds(projects, knownProjects) {
+  const knownByPath = new Map();
+  for (const project of knownProjects) {
+    knownByPath.set(normalizePathKey(project.cwd), project);
+  }
+
+  return projects.map((project) => {
+    const known = knownByPath.get(normalizePathKey(project.cwd));
+    return {
+      ...project,
+      id: known?.id || project.id
+    };
+  });
+}
+
+function normalizePathKey(cwd) {
+  return path.resolve(String(cwd || "")).toLowerCase();
+}
+
+function discoverCodexDesktopProjects() {
+  const state = readCodexGlobalState();
+  const roots = firstStringArray(
+    state?.["project-order"],
+    state?.["electron-saved-workspace-roots"],
+    Object.keys(state?.["electron-persisted-atom-state"]?.["sidebar-collapsed-groups"] || {})
+  );
+
+  return roots
+    .map((cwd) => path.resolve(cwd))
+    .filter((cwd) => fs.existsSync(cwd))
+    .map((cwd) => ({
+      id: projectId(cwd),
+      name: path.basename(cwd),
+      cwd
+    }));
+}
+
+function readCodexGlobalState() {
+  const home = process.env.USERPROFILE || process.env.HOME || "";
+  const file = path.join(home, ".codex", ".codex-global-state.json");
+  if (!fs.existsSync(file)) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(fs.readFileSync(file, "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+function firstStringArray(...values) {
+  for (const value of values) {
+    if (Array.isArray(value) && value.length > 0) {
+      return value.filter((item) => typeof item === "string" && item.trim());
+    }
+  }
+  return [];
 }
 
 function discoverCodexSessionProjects() {
@@ -84,34 +154,6 @@ function discoverCodexSessionProjects() {
           projects.push({ id: projectId(cwd), name: path.basename(cwd), cwd });
           break;
         }
-      }
-    }
-  }
-  return projects;
-}
-
-function discoverLocalProjectDirs() {
-  const home = process.env.USERPROFILE || process.env.HOME || "";
-  const roots = [path.join(home, "Documents"), path.join(home, "Desktop")];
-  const markers = new Set([
-    ".git",
-    "package.json",
-    "pyproject.toml",
-    "requirements.txt",
-    "Cargo.toml",
-    "go.mod",
-    "pom.xml",
-    "build.gradle",
-    "README.md"
-  ]);
-  const projects = [];
-  for (const root of roots) {
-    if (!fs.existsSync(root)) continue;
-    for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
-      if (!entry.isDirectory()) continue;
-      const cwd = path.join(root, entry.name);
-      if (hasAnyMarker(cwd, markers)) {
-        projects.push({ id: projectId(cwd), name: entry.name, cwd });
       }
     }
   }
@@ -144,14 +186,6 @@ function listFiles(root, ext, limit) {
 
 function readHead(file, count) {
   return fs.readFileSync(file, "utf8").split(/\r?\n/).filter(Boolean).slice(0, count);
-}
-
-function hasAnyMarker(cwd, markers) {
-  try {
-    return fs.readdirSync(cwd).some((name) => markers.has(name));
-  } catch {
-    return false;
-  }
 }
 
 function projectId(cwd) {
