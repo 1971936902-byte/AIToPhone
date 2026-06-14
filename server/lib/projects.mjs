@@ -8,7 +8,9 @@ const PROJECT_STATE_FILE = path.join(process.cwd(), "data", "project-state.json"
 
 export function loadProjects() {
   const file = fs.existsSync(LOCAL_PROJECT_FILE) ? LOCAL_PROJECT_FILE : DEFAULT_PROJECT_FILE;
-  return loadProjectsFromFile(file);
+  const state = loadProjectState();
+  removeCodexDesktopProjects([...state.hiddenProjectCwds]);
+  return loadProjectsFromFile(file).filter((project) => !state.hiddenProjectCwds.has(normalizePathKey(project.cwd)));
 }
 
 export function refreshProjects(currentProjects = []) {
@@ -17,6 +19,7 @@ export function refreshProjects(currentProjects = []) {
   const codexDesktopProjects = discoverCodexDesktopProjects();
   const discoveredProjects = codexDesktopProjects.length > 0 ? codexDesktopProjects : discoverCodexSessionProjects();
   const hidden = loadProjectState().hiddenProjectCwds;
+  removeCodexDesktopProjects([...hidden]);
   const merged = mergeProjects([
     ...applyKnownIds(discoveredProjects, knownProjects),
     ...defaultProjects
@@ -236,6 +239,31 @@ function removeCodexDesktopProject(cwd) {
   return writeCodexGlobalState(state);
 }
 
+function removeCodexDesktopProjects(cwds) {
+  const state = readCodexGlobalState();
+  if (!state) {
+    return false;
+  }
+
+  const hidden = new Set(cwds.map(normalizePathKey));
+  if (hidden.size === 0) {
+    return false;
+  }
+
+  state["project-order"] = removePathsFromList(state["project-order"], hidden);
+  state["electron-saved-workspace-roots"] = removePathsFromList(state["electron-saved-workspace-roots"], hidden);
+  const atom = state["electron-persisted-atom-state"] || {};
+  if (atom["sidebar-collapsed-groups"]) {
+    for (const key of Object.keys(atom["sidebar-collapsed-groups"])) {
+      if (hidden.has(normalizePathKey(key))) {
+        delete atom["sidebar-collapsed-groups"][key];
+      }
+    }
+  }
+  state["electron-persisted-atom-state"] = atom;
+  return writeCodexGlobalState(state);
+}
+
 function upsertPathList(value, cwd) {
   const list = Array.isArray(value) ? value.filter((item) => normalizePathKey(item) !== normalizePathKey(cwd)) : [];
   list.unshift(cwd);
@@ -244,6 +272,10 @@ function upsertPathList(value, cwd) {
 
 function removePathFromList(value, cwd) {
   return Array.isArray(value) ? value.filter((item) => normalizePathKey(item) !== normalizePathKey(cwd)) : [];
+}
+
+function removePathsFromList(value, hidden) {
+  return Array.isArray(value) ? value.filter((item) => !hidden.has(normalizePathKey(item))) : [];
 }
 
 function firstStringArray(...values) {
