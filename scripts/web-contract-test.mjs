@@ -54,6 +54,15 @@ test("Send flow immediately renders user text and pending assistant state", () =
   assert.match(app, /removePendingThinking\(payload\.threadId\)/);
 });
 
+test("Send and upload failures preserve recoverable user state", () => {
+  const app = read("public/app.js");
+  assert.match(app, /restoreComposerDraft\(text, attachments\)/);
+  assert.match(app, /function restoreComposerDraft\(text, attachments\)/);
+  assert.match(app, /els\.messageInput\.value = text/);
+  assert.match(app, /state\.attachments = \[\.{3}restored, \.{3}state\.attachments\]/);
+  assert.match(app, /附件上传失败/);
+});
+
 test("Sidebar supports selected project collapse state", () => {
   const app = read("public/app.js");
   assert.match(app, /collapsedProjects: loadCollapsedProjects\(\)/);

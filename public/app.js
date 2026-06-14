@@ -162,7 +162,11 @@ els.fileInput.addEventListener("change", async () => {
   const files = [...els.fileInput.files];
   els.fileInput.value = "";
   for (const file of files) {
-    await uploadFile(file);
+    try {
+      await uploadFile(file);
+    } catch (err) {
+      addSystemMessage(`附件上传失败：${err.message}`);
+    }
   }
 });
 
@@ -197,6 +201,7 @@ els.composer.addEventListener("submit", async (event) => {
   } catch (err) {
     removeMessageNode(optimisticId);
     removePendingThinking(threadId);
+    restoreComposerDraft(text, attachments);
     addSystemMessage(err.message);
   } finally {
     setBusy(false);
@@ -640,6 +645,19 @@ function renderAttachmentTray() {
 function clearAttachments() {
   state.attachments = [];
   renderAttachmentTray();
+}
+
+function restoreComposerDraft(text, attachments) {
+  if (text && !els.messageInput.value.trim()) {
+    els.messageInput.value = text;
+    autosizeInput();
+  }
+  const existingIds = new Set(state.attachments.map((item) => item.id || item.path || item.name));
+  const restored = attachments.filter((item) => !existingIds.has(item.id || item.path || item.name));
+  if (restored.length) {
+    state.attachments = [...restored, ...state.attachments];
+    renderAttachmentTray();
+  }
 }
 
 function readFileAsDataUrl(file) {
