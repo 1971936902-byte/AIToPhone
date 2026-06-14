@@ -1,0 +1,206 @@
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+process.chdir(repoRoot);
+
+const results = [];
+
+function test(name, fn) {
+  try {
+    fn();
+    results.push({ name, ok: true });
+  } catch (error) {
+    results.push({ name, ok: false, error });
+  }
+}
+
+function read(file) {
+  return fs.readFileSync(path.join(repoRoot, file), "utf8");
+}
+
+test("HTML loads current cache-busted assets", () => {
+  const html = read("public/index.html");
+  const sw = read("public/sw.js");
+  assert.match(html, /styles\.css\?v=\d+/);
+  assert.match(html, /app\.js\?v=\d+/);
+  const styleVersion = html.match(/styles\.css\?v=(\d+)/)?.[1];
+  const appVersion = html.match(/app\.js\?v=(\d+)/)?.[1];
+  assert.ok(sw.includes(`/styles.css?v=${styleVersion}`));
+  assert.ok(sw.includes(`/app.js?v=${appVersion}`));
+});
+
+test("Mobile viewport and keyboard safeguards are present", () => {
+  const html = read("public/index.html");
+  const css = read("public/styles.css");
+  const app = read("public/app.js");
+  assert.match(html, /maximum-scale=1/);
+  assert.doesNotMatch(html, /interactive-widget=resizes-content/);
+  assert.match(css, /--keyboard-inset/);
+  assert.match(css, /#messageInput[\s\S]*font-size:\s*16px/);
+  assert.match(app, /setProperty\("--keyboard-inset"/);
+  assert.doesNotMatch(app, /scrollIntoView/);
+});
+
+test("Send flow immediately renders user text and pending assistant state", () => {
+  const app = read("public/app.js");
+  assert.match(app, /upsertMessage\(\{ id: optimisticId, threadId, role: "user"/);
+  assert.match(app, /addPendingThinking\(threadId\)/);
+  assert.match(app, /if \(data\.message\) \{/);
+  assert.match(app, /removeMessageNode\(optimisticId\)/);
+  assert.match(app, /removePendingThinking\(payload\.threadId\)/);
+});
+
+test("Sidebar supports selected project collapse state", () => {
+  const app = read("public/app.js");
+  assert.match(app, /collapsedProjects: loadCollapsedProjects\(\)/);
+  assert.match(app, /section\.open = selected && !state\.collapsedProjects\.has\(group\.id\)/);
+  assert.match(app, /setProjectCollapsed\(group\.id, section\.open\)/);
+});
+
+test("Client sync loop is below 5 seconds and websocket reconnects", () => {
+  const app = read("public/app.js");
+  const server = read("server/index.mjs");
+  assert.match(server, /SYNC_INTERVAL_MS \|\| 3000/);
+  assert.match(app, /setTimeout\(connectEvents, 2500\)/);
+  assert.match(app, /setInterval\(async \(\) =>[\s\S]*}, 4000\)/);
+});
+
+await testConversationStoreContract();
+await testCodexEventNormalization();
+
+for (const result of results) {
+  if (result.ok) {
+    console.log(`ok - ${result.name}`);
+  } else {
+    console.error(`not ok - ${result.name}`);
+    console.error(result.error?.stack || result.error);
+  }
+}
+
+const failed = results.filter((result) => !result.ok);
+if (failed.length) {
+  process.exitCode = 1;
+} else {
+  console.log(`\n${results.length} web contract tests passed.`);
+}
+
+async function testConversationStoreContract() {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "aitophone-web-test-"));
+  const originalCwd = process.cwd();
+  process.chdir(tmp);
+  try {
+    const { ConversationStore } = await import(`file:///${path.join(repoRoot, "server/lib/conversationStore.mjs").replace(/\\/g, "/")}?t=${Date.now()}`);
+    const projects = [
+      { id: "mobile-project", name: "手机端假项目", cwd: path.join(tmp, "mobile-project") },
+      { id: "desktop-project", name: "电脑端假项目", cwd: path.join(tmp, "desktop-project") }
+    ];
+    const store = new ConversationStore(projects);
+    store.createThread({
+      threadId: "thread-mobile-1",
+      projectId: "mobile-project",
+      projectName: "手机端假项目",
+      cwd: projects[0].cwd,
+      createdAt: "2026-06-15T01:00:00.000Z"
+    });
+    const user = store.addMessage({
+      threadId: "thread-mobile-1",
+      role: "user",
+      text: "手机端输入问题",
+      attachments: [{ kind: "image", name: "fake.png", path: path.join(tmp, "fake.png") }]
+    });
+    const agent1 = store.upsertAgentMessage({
+      threadId: "thread-mobile-1",
+      messageId: "agent-1",
+      turnId: "turn-1",
+      mode: "append",
+      text: "第一段"
+    });
+    const agent2 = store.upsertAgentMessage({
+      threadId: "thread-mobile-1",
+      messageId: "agent-1",
+      turnId: "turn-1",
+      mode: "append",
+      text: "第二段"
+    });
+
+    test("Fake mobile send persists user and assistant messages", () => {
+      assert.equal(user.role, "user");
+      assert.equal(agent1.id, "agent-1");
+      assert.equal(agent2.text, "第一段第二段");
+      assert.equal(store.getMessages("thread-mobile-1").length, 2);
+    });
+
+    test("Fake desktop reload sees mobile-created conversation", () => {
+      const desktopView = new ConversationStore(projects);
+      const group = desktopView.listConversations().find((item) => item.id === "mobile-project");
+      assert.equal(group.threads.length, 1);
+      assert.equal(group.threads[0].threadId, "thread-mobile-1");
+      assert.equal(desktopView.getMessages("thread-mobile-1").length, 2);
+    });
+
+    test("Thread deletion removes messages from fake sync store", () => {
+      assert.equal(store.deleteThread("thread-mobile-1"), true);
+      assert.equal(store.getMessages("thread-mobile-1").length, 0);
+    });
+  } finally {
+    process.chdir(originalCwd);
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
+async function testCodexEventNormalization() {
+  const { normalizeCodexEvent } = await import(`file:///${path.join(repoRoot, "server/lib/conversationStore.mjs").replace(/\\/g, "/")}?norm=${Date.now()}`);
+
+  test("Codex delta event normalizes to append agent text", () => {
+    const update = normalizeCodexEvent({
+      method: "thread/item/update",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        delta: "hello",
+        item: { id: "msg-1", type: "agentMessage", phase: "final_answer" }
+      }
+    });
+    assert.deepEqual(update, {
+      kind: "agent-text",
+      threadId: "thread-1",
+      turnId: "turn-1",
+      messageId: "msg-1",
+      mode: "append",
+      text: "hello"
+    });
+  });
+
+  test("Codex turn complete event normalizes for send-button recovery", () => {
+    const update = normalizeCodexEvent({
+      method: "thread/turn",
+      params: { threadId: "thread-1", turnId: "turn-1", status: "completed" }
+    });
+    assert.deepEqual(update, {
+      kind: "turn-complete",
+      threadId: "thread-1",
+      turnId: "turn-1"
+    });
+  });
+
+  test("Non-final or non-agent Codex events are ignored", () => {
+    assert.equal(
+      normalizeCodexEvent({
+        method: "thread/item/update",
+        params: { threadId: "thread-1", delta: "ignore", item: { type: "toolCall", phase: "final_answer" } }
+      }),
+      null
+    );
+    assert.equal(
+      normalizeCodexEvent({
+        method: "thread/item/update",
+        params: { threadId: "thread-1", delta: "ignore", item: { type: "agentMessage", phase: "analysis" } }
+      }),
+      null
+    );
+  });
+}
