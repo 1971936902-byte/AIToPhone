@@ -707,33 +707,53 @@ function compactNumber(value) {
 function initViewportSizing() {
   const viewport = window.visualViewport;
   let frame = 0;
+  let lastHeight = 0;
 
-  const sync = () => {
+  const scrollMessagesToBottom = () => {
+    els.messages.scrollTop = els.messages.scrollHeight;
+  };
+
+  const sync = (options = {}) => {
     cancelAnimationFrame(frame);
     frame = requestAnimationFrame(() => {
       const height = viewport?.height || window.innerHeight;
-      document.documentElement.style.setProperty("--app-height", `${Math.round(height)}px`);
+      const roundedHeight = Math.round(height);
+      const keyboardOpen = document.activeElement === els.messageInput;
+      const changed = Math.abs(roundedHeight - lastHeight) > 2;
+      lastHeight = roundedHeight;
+
+      document.documentElement.style.setProperty("--app-height", `${roundedHeight}px`);
+      document.documentElement.style.setProperty("--composer-height", `${Math.ceil(els.composer.getBoundingClientRect().height)}px`);
+      document.body.classList.toggle("keyboard-open", keyboardOpen);
       window.scrollTo(0, 0);
 
-      if (document.activeElement === els.messageInput) {
-        els.messages.scrollTop = els.messages.scrollHeight;
-        els.composer.scrollIntoView({ block: "end" });
+      if (keyboardOpen || changed || options.forceBottom) {
+        scrollMessagesToBottom();
+        els.messageInput.scrollIntoView({ block: "nearest" });
       }
     });
   };
 
   sync();
-  window.addEventListener("resize", sync);
+  window.addEventListener("resize", () => sync());
   window.addEventListener("orientationchange", () => setTimeout(sync, 250));
-  viewport?.addEventListener("resize", sync);
-  viewport?.addEventListener("scroll", sync);
-  els.messageInput.addEventListener("focus", () => setTimeout(sync, 80));
-  els.messageInput.addEventListener("blur", () => setTimeout(sync, 120));
+  viewport?.addEventListener("resize", () => sync());
+  viewport?.addEventListener("scroll", () => sync());
+  els.messageInput.addEventListener("focus", () => {
+    sync({ forceBottom: true });
+    setTimeout(() => sync({ forceBottom: true }), 80);
+    setTimeout(() => sync({ forceBottom: true }), 260);
+  });
+  els.messageInput.addEventListener("blur", () => {
+    setTimeout(() => sync({ forceBottom: true }), 120);
+    setTimeout(() => sync({ forceBottom: true }), 300);
+  });
 }
 
 function autosizeInput() {
   els.messageInput.style.height = "auto";
   els.messageInput.style.height = `${Math.min(140, els.messageInput.scrollHeight)}px`;
+  document.documentElement.style.setProperty("--composer-height", `${Math.ceil(els.composer.getBoundingClientRect().height)}px`);
 }
 
 function setBusy(busy) {
