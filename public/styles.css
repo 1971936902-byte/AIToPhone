@@ -520,33 +520,25 @@ select {
 
 .project-group summary span {
   min-width: 0;
+  flex: 1;
 }
 
-.project-group summary span::after {
+.project-arrow::after {
   content: "▾";
-  margin-left: 4px;
   color: var(--accent);
-  font-size: 11px;
+  font-size: 16px;
+  line-height: 1;
 }
 
-.project-group[open] summary span::after {
+.project-group[open] .project-arrow::after {
   content: "▴";
 }
 
-.project-group summary strong,
-.project-group summary em {
+.project-group summary strong {
   display: block;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.project-group summary em {
-  margin-top: 2px;
-  color: var(--muted);
-  font-size: 11px;
-  font-style: normal;
-  font-weight: 500;
 }
 
 .project-group summary::-webkit-details-marker { display: none; }

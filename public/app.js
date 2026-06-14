@@ -384,8 +384,8 @@ function renderConversations() {
       <summary>
         <span>
           <strong>${escapeHtml(group.name)}</strong>
-          <em>${escapeHtml(group.cwd || "")}</em>
         </span>
+        <b class="project-arrow" aria-hidden="true"></b>
         <small>${group.threads?.length || 0}</small>
       </summary>
     `;
