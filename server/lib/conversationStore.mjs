@@ -79,6 +79,24 @@ export class ConversationStore {
     return true;
   }
 
+  deleteProjectThreads(projectId) {
+    const threadIds = [...this.threads.values()]
+      .filter((thread) => thread.projectId === projectId)
+      .map((thread) => thread.threadId);
+    for (const threadId of threadIds) {
+      this.threads.delete(threadId);
+    }
+    for (const [messageId, message] of this.messages.entries()) {
+      if (threadIds.includes(message.threadId)) {
+        this.messages.delete(messageId);
+      }
+    }
+    if (threadIds.length > 0) {
+      this.save();
+    }
+    return threadIds;
+  }
+
   getMessages(threadId) {
     return [...this.messages.values()]
       .filter((message) => message.threadId === threadId)

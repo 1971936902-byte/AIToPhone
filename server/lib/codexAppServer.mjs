@@ -121,6 +121,10 @@ export class CodexAppServer extends EventEmitter {
     return this.request("thread/goal/get", { threadId });
   }
 
+  async unsubscribeThread(threadId) {
+    return this.request("thread/unsubscribe", { threadId });
+  }
+
   async setGoal(threadId, objective, tokenBudget) {
     const params = {
       threadId,

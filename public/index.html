@@ -9,7 +9,7 @@
     <meta name="theme-color" content="#1f6f78" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/icon.svg" />
-    <link rel="stylesheet" href="/styles.css?v=10" />
+    <link rel="stylesheet" href="/styles.css?v=11" />
     <title>AIToPhone</title>
   </head>
   <body>
@@ -111,6 +111,22 @@
         </div>
       </dialog>
 
+      <dialog id="newDialog">
+        <div class="dialog-head">
+          <h2>新建</h2>
+          <button id="closeNewDialogBtn" class="icon-btn">×</button>
+        </div>
+        <div class="dialog-body">
+          <button id="createThreadBtn" type="button">在当前项目中新建会话</button>
+          <label for="newProjectName">新项目名称</label>
+          <input id="newProjectName" type="text" placeholder="例如：我的新项目" />
+          <label for="newProjectPath">项目目录</label>
+          <input id="newProjectPath" type="text" placeholder="留空则创建到 Windows 文档目录" />
+          <p class="hint">新建项目会在电脑端创建目录，写入 CodeX 桌面项目列表，并立即开启一个 CodeX 会话。</p>
+          <button id="createProjectBtn" type="button">新建项目并开启会话</button>
+        </div>
+      </dialog>
+
       <dialog id="helpDialog">
         <div class="dialog-head">
           <h2>使用帮助</h2>
@@ -162,6 +178,6 @@
         </div>
       </dialog>
     </main>
-    <script src="/app.js?v=11" type="module"></script>
+    <script src="/app.js?v=12" type="module"></script>
   </body>
 </html>

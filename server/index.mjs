@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { WebSocketServer } from "ws";
 import { CodexAppServer } from "./lib/codexAppServer.mjs";
 import { ConversationStore, normalizeCodexEvent } from "./lib/conversationStore.mjs";
-import { getProject, loadProjects, publicProjects, refreshProjects } from "./lib/projects.mjs";
+import { createProject, getProject, loadProjects, publicProjects, refreshProjects, removeProject } from "./lib/projects.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.resolve(__dirname, "..", "public");
@@ -119,6 +119,32 @@ async function handleApi(req, res, url) {
     return sendJson(res, 200, { projects: publicProjects(projects) });
   }
 
+  if (req.method === "POST" && url.pathname === "/api/projects") {
+    const body = await readJson(req);
+    const created = createProject({
+      name: body.name,
+      cwd: body.cwd,
+      currentProjects: projects
+    });
+    projects = created.projects;
+    store.setProjects(projects);
+
+    let thread = null;
+    let result = null;
+    if (body.createThread !== false) {
+      ({ thread, result } = await startProjectThread(created.project));
+    }
+
+    broadcastSync("project-created", { project: publicProjects([created.project])[0], thread });
+    return sendJson(res, 200, {
+      project: publicProjects([created.project])[0],
+      thread,
+      result,
+      projects: publicProjects(projects),
+      conversations: store.listConversations()
+    });
+  }
+
   if (req.method === "POST" && url.pathname === "/api/projects/refresh") {
     projects = refreshProjects(projects);
     store.setProjects(projects);
@@ -159,33 +185,43 @@ async function handleApi(req, res, url) {
       return sendJson(res, 404, { error: "Project not found" });
     }
 
-    const result = await codex.startThread({ cwd: project.cwd });
-    const threadId = result?.threadId || result?.thread_id || result?.id || result?.thread?.id;
-    if (!threadId) {
-      return sendJson(res, 502, { error: "Codex did not return a thread id", result });
-    }
-
-    const thread = {
-      threadId,
-      projectId: project.id,
-      projectName: project.name,
-      cwd: project.cwd,
-      createdAt: new Date().toISOString()
-    };
-    store.createThread(thread);
+    const { thread, result } = await startProjectThread(project);
     broadcastSync("thread-created", { thread });
     return sendJson(res, 200, { thread, result });
+  }
+
+  const projectMatch = url.pathname.match(/^\/api\/projects\/([^/]+)$/);
+  if (req.method === "DELETE" && projectMatch) {
+    const projectId = decodeURIComponent(projectMatch[1]);
+    const removedThreadIds = store.deleteProjectThreads(projectId);
+    const codexUnsubscribe = await unsubscribeThreads(removedThreadIds);
+    const removed = removeProject(projectId, projects);
+    if (!removed.removed) {
+      return sendJson(res, 404, { error: "Project not found" });
+    }
+    projects = removed.projects;
+    store.setProjects(projects);
+    broadcastSync("project-deleted", { projectId, removedThreadIds, codexUnsubscribe });
+    return sendJson(res, 200, {
+      ok: true,
+      projectId,
+      removedThreadIds,
+      codexUnsubscribe,
+      projects: publicProjects(projects),
+      conversations: store.listConversations()
+    });
   }
 
   const threadMatch = url.pathname.match(/^\/api\/threads\/([^/]+)$/);
   if (req.method === "DELETE" && threadMatch) {
     const threadId = decodeURIComponent(threadMatch[1]);
+    const codexUnsubscribe = await unsubscribeThreads([threadId]);
     const deleted = store.deleteThread(threadId);
     if (!deleted) {
       return sendJson(res, 404, { error: "Thread not found" });
     }
-    broadcastSync("thread-deleted", { threadId });
-    return sendJson(res, 200, { ok: true, threadId });
+    broadcastSync("thread-deleted", { threadId, codexUnsubscribe });
+    return sendJson(res, 200, { ok: true, threadId, codexUnsubscribe });
   }
 
   if (req.method === "GET" && threadMatch) {
@@ -245,6 +281,39 @@ function isAuthorized(req, url) {
   const auth = req.headers.authorization || "";
   const bearer = auth.startsWith("Bearer ") ? auth.slice(7) : "";
   return bearer === authToken || url.searchParams.get("token") === authToken;
+}
+
+async function startProjectThread(project) {
+  const result = await codex.startThread({ cwd: project.cwd });
+  const threadId = result?.threadId || result?.thread_id || result?.id || result?.thread?.id;
+  if (!threadId) {
+    const err = new Error("Codex did not return a thread id");
+    err.result = result;
+    throw err;
+  }
+
+  const thread = {
+    threadId,
+    projectId: project.id,
+    projectName: project.name,
+    cwd: project.cwd,
+    createdAt: new Date().toISOString()
+  };
+  store.createThread(thread);
+  return { thread, result };
+}
+
+async function unsubscribeThreads(threadIds) {
+  const results = [];
+  for (const threadId of threadIds) {
+    try {
+      const result = await codex.unsubscribeThread(threadId);
+      results.push({ threadId, ok: true, result });
+    } catch (err) {
+      results.push({ threadId, ok: false, error: err.message || String(err) });
+    }
+  }
+  return results;
 }
 
 function readJson(req, maxBytes = 1024 * 1024) {

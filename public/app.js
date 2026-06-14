@@ -55,7 +55,13 @@ const els = {
   connectionDialog: document.querySelector("#connectionDialog"),
   closeConnectionBtn: document.querySelector("#closeConnectionBtn"),
   helpDialog: document.querySelector("#helpDialog"),
-  closeHelpBtn: document.querySelector("#closeHelpBtn")
+  closeHelpBtn: document.querySelector("#closeHelpBtn"),
+  newDialog: document.querySelector("#newDialog"),
+  closeNewDialogBtn: document.querySelector("#closeNewDialogBtn"),
+  createThreadBtn: document.querySelector("#createThreadBtn"),
+  newProjectName: document.querySelector("#newProjectName"),
+  newProjectPath: document.querySelector("#newProjectPath"),
+  createProjectBtn: document.querySelector("#createProjectBtn")
 };
 
 els.tokenInput.value = state.token;
@@ -70,6 +76,7 @@ els.openConnectionBtn.addEventListener("click", openConnectionDialog);
 els.closeConnectionBtn.addEventListener("click", () => els.connectionDialog.close());
 els.openHelpBtn.addEventListener("click", () => els.helpDialog.showModal());
 els.closeHelpBtn.addEventListener("click", () => els.helpDialog.close());
+els.closeNewDialogBtn.addEventListener("click", () => els.newDialog.close());
 els.saveGatewayBtn.addEventListener("click", () => {
   state.gatewayBaseUrl = normalizeGatewayUrl(els.gatewayInput.value);
   els.gatewayInput.value = state.gatewayBaseUrl;
@@ -103,14 +110,42 @@ els.clearLoginBtn.addEventListener("click", () => {
 els.projectSelect.addEventListener("change", renderConversations);
 
 
-els.newThreadBtn.addEventListener("click", async () => {
+els.newThreadBtn.addEventListener("click", () => {
+  els.newDialog.showModal();
+});
+
+els.createThreadBtn.addEventListener("click", async () => {
   const projectId = els.projectSelect.value;
   if (!projectId) return;
+  try {
+    await createThreadForProject(projectId);
+    els.newDialog.close();
+    closeDrawer();
+  } catch (err) {
+    addSystemMessage(err.message);
+  }
+});
+
+els.createProjectBtn.addEventListener("click", async () => {
+  const name = els.newProjectName.value.trim();
+  const cwd = els.newProjectPath.value.trim();
+  if (!name && !cwd) {
+    addSystemMessage("请输入项目名称或目录。");
+    return;
+  }
+
   setBusy(true);
   try {
-    const data = await api("/api/threads", { method: "POST", body: { projectId } });
+    const data = await api("/api/projects", {
+      method: "POST",
+      body: { name, cwd, createThread: true }
+    });
+    els.newProjectName.value = "";
+    els.newProjectPath.value = "";
     await loadSync();
-    await selectThread(data.thread.threadId);
+    if (data.project?.id) els.projectSelect.value = data.project.id;
+    if (data.thread?.threadId) await selectThread(data.thread.threadId);
+    els.newDialog.close();
     closeDrawer();
   } catch (err) {
     addSystemMessage(err.message);
@@ -368,10 +403,19 @@ function renderConversations() {
     create.type = "button";
     create.textContent = "新建对话";
     create.addEventListener("click", async () => {
-      els.projectSelect.value = group.id;
-      els.newThreadBtn.click();
+      await createThreadForProject(group.id);
+      closeDrawer();
     });
     actions.append(create);
+    const removeProject = document.createElement("button");
+    removeProject.className = "danger-inline-btn";
+    removeProject.type = "button";
+    removeProject.textContent = "\u5220\u9664\u9879\u76ee";
+    removeProject.addEventListener("click", async () => {
+      if (!confirm(`\u4ece AIToPhone \u548c CodeX \u9879\u76ee\u5217\u8868\u79fb\u9664\u300c${group.name}\u300d\uff1f\u4e0d\u4f1a\u5220\u9664\u78c1\u76d8\u6587\u4ef6\u3002`)) return;
+      await deleteProject(group.id);
+    });
+    actions.append(removeProject);
     section.append(actions);
 
     const threads = group.threads || [];
@@ -384,6 +428,34 @@ function renderConversations() {
       for (const thread of threads) section.append(renderThreadButton(thread));
     }
     els.conversationList.append(section);
+  }
+}
+
+async function createThreadForProject(projectId) {
+  setBusy(true);
+  try {
+    const data = await api("/api/threads", { method: "POST", body: { projectId } });
+    await loadSync();
+    if (projectId) els.projectSelect.value = projectId;
+    await selectThread(data.thread.threadId);
+    return data;
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function deleteProject(projectId) {
+  try {
+    await api(`/api/projects/${encodeURIComponent(projectId)}`, { method: "DELETE" });
+    if (state.projects.some((project) => project.id === projectId)) {
+      state.threadId = "";
+      localStorage.removeItem("aitophone_thread");
+      els.chatTitle.textContent = "AIToPhone";
+      renderEmpty("\u8bf7\u9009\u62e9\u9879\u76ee\u540e\u65b0\u5efa\u6216\u6253\u5f00\u5bf9\u8bdd");
+    }
+    await loadSync();
+  } catch (err) {
+    addSystemMessage(err.message);
   }
 }
 
@@ -665,6 +737,8 @@ function autosizeInput() {
 function setBusy(busy) {
   els.sendBtn.disabled = busy;
   els.newThreadBtn.disabled = busy;
+  if (els.createThreadBtn) els.createThreadBtn.disabled = busy;
+  if (els.createProjectBtn) els.createProjectBtn.disabled = busy;
 }
 
 function renderSyncIndicator(value, reason = "") {
