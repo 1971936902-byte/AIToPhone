@@ -36,6 +36,7 @@ const els = {
   saveTokenBtn: document.querySelector("#saveTokenBtn"),
   projectSelect: document.querySelector("#projectSelect"),
   conversationList: document.querySelector("#conversationList"),
+  refreshProjectsBtn: document.querySelector("#refreshProjectsBtn"),
   newThreadBtn: document.querySelector("#newThreadBtn"),
   messages: document.querySelector("#messages"),
   composer: document.querySelector("#composer"),
@@ -74,6 +75,21 @@ els.saveTokenBtn.addEventListener("click", () => {
 });
 
 els.projectSelect.addEventListener("change", renderConversations);
+
+els.refreshProjectsBtn.addEventListener("click", async () => {
+  setProjectRefreshBusy(true);
+  try {
+    const data = await api("/api/projects/refresh", { method: "POST" });
+    state.projects = data.projects || [];
+    state.conversations = data.conversations || [];
+    renderProjects();
+    renderConversations();
+  } catch (err) {
+    addSystemMessage(`刷新项目失败：${err.message}`);
+  } finally {
+    setProjectRefreshBusy(false);
+  }
+});
 
 els.newThreadBtn.addEventListener("click", async () => {
   const projectId = els.projectSelect.value;
@@ -259,6 +275,13 @@ function connectEvents() {
     const payload = JSON.parse(event.data);
     if (payload.type === "status") return renderStatus(payload.status);
     if (payload.type === "thread") return loadConversations();
+    if (payload.type === "projects") {
+      state.projects = payload.projects || [];
+      state.conversations = payload.conversations || [];
+      renderProjects();
+      renderConversations();
+      return;
+    }
     if (payload.type === "message") {
       await loadConversations();
       if (payload.threadId === state.threadId) upsertMessage(payload.message);
@@ -271,12 +294,16 @@ function connectEvents() {
 }
 
 function renderProjects() {
+  const selected = els.projectSelect.value;
   els.projectSelect.innerHTML = "";
   for (const project of state.projects) {
     const option = document.createElement("option");
     option.value = project.id;
-    option.textContent = project.name;
+    option.textContent = `${project.name} · ${baseName(project.cwd)}`;
     els.projectSelect.append(option);
+  }
+  if (selected && state.projects.some((project) => project.id === selected)) {
+    els.projectSelect.value = selected;
   }
 }
 
@@ -286,7 +313,15 @@ function renderConversations() {
     const section = document.createElement("details");
     section.className = "project-group";
     section.open = group.id === (els.projectSelect.value || state.projects[0]?.id);
-    section.innerHTML = `<summary><span>${escapeHtml(group.name)}</span><small>${group.threads?.length || 0}</small></summary>`;
+    section.innerHTML = `
+      <summary>
+        <span>
+          <strong>${escapeHtml(group.name)}</strong>
+          <em>${escapeHtml(group.cwd || "")}</em>
+        </span>
+        <small>${group.threads?.length || 0}</small>
+      </summary>
+    `;
     const actions = document.createElement("div");
     actions.className = "project-actions";
     const create = document.createElement("button");
@@ -540,4 +575,13 @@ function autosizeInput() {
 function setBusy(busy) {
   els.sendBtn.disabled = busy;
   els.newThreadBtn.disabled = busy;
+}
+
+function setProjectRefreshBusy(busy) {
+  els.refreshProjectsBtn.disabled = busy;
+  els.refreshProjectsBtn.textContent = busy ? "刷新中" : "刷新";
+}
+
+function baseName(filePath) {
+  return String(filePath || "").split(/[\\/]/).filter(Boolean).pop() || "";
 }

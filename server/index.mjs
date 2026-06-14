@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { WebSocketServer } from "ws";
 import { CodexAppServer } from "./lib/codexAppServer.mjs";
 import { ConversationStore, normalizeCodexEvent } from "./lib/conversationStore.mjs";
-import { getProject, loadProjects, publicProjects } from "./lib/projects.mjs";
+import { getProject, loadProjects, publicProjects, refreshProjects } from "./lib/projects.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.resolve(__dirname, "..", "public");
@@ -14,7 +14,7 @@ const uploadDir = path.resolve(process.cwd(), "uploads");
 const host = process.env.HOST || "0.0.0.0";
 const port = Number(process.env.PORT || 8787);
 const authToken = process.env.AUTH_TOKEN || "change-this-long-random-token";
-const projects = loadProjects();
+let projects = loadProjects();
 const codex = new CodexAppServer();
 const clients = new Set();
 const store = new ConversationStore(projects);
@@ -106,6 +106,17 @@ async function handleApi(req, res, url) {
 
   if (req.method === "GET" && url.pathname === "/api/projects") {
     return sendJson(res, 200, { projects: publicProjects(projects) });
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/projects/refresh") {
+    projects = refreshProjects(projects);
+    store.setProjects(projects);
+    const payload = {
+      projects: publicProjects(projects),
+      conversations: store.listConversations()
+    };
+    broadcast({ type: "projects", ...payload });
+    return sendJson(res, 200, payload);
   }
 
   if (req.method === "GET" && url.pathname === "/api/conversations") {

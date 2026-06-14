@@ -9,7 +9,7 @@
     <meta name="theme-color" content="#1f6f78" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/icon.svg" />
-    <link rel="stylesheet" href="/styles.css?v=7" />
+    <link rel="stylesheet" href="/styles.css?v=8" />
     <title>AIToPhone</title>
   </head>
   <body>
@@ -55,7 +55,10 @@
         <section class="drawer-section">
           <div class="section-title">
             <span>项目和对话</span>
-            <button id="newThreadBtn" class="ghost-btn">新建</button>
+            <div class="title-actions">
+              <button id="refreshProjectsBtn" class="ghost-btn" type="button">刷新</button>
+              <button id="newThreadBtn" class="ghost-btn" type="button">新建</button>
+            </div>
           </div>
           <select id="projectSelect"></select>
           <div id="conversationList" class="conversation-list"></div>
@@ -93,6 +96,6 @@
         <pre id="limitsOutput"></pre>
       </dialog>
     </main>
-    <script src="/app.js?v=7" type="module"></script>
+    <script src="/app.js?v=8" type="module"></script>
   </body>
 </html>

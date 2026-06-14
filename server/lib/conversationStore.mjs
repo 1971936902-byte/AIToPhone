@@ -12,6 +12,10 @@ export class ConversationStore {
     this.load();
   }
 
+  setProjects(projects) {
+    this.projects = projects;
+  }
+
   load() {
     if (!fs.existsSync(DATA_FILE)) {
       return;

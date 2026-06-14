@@ -335,6 +335,12 @@ h2 {
   gap: 12px;
 }
 
+.title-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
 .drawer-section {
   display: grid;
   gap: 8px;
@@ -456,10 +462,31 @@ select {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
   cursor: pointer;
   font-weight: 800;
   list-style: none;
   padding: 6px 4px;
+}
+
+.project-group summary span {
+  min-width: 0;
+}
+
+.project-group summary strong,
+.project-group summary em {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-group summary em {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 500;
 }
 
 .project-group summary::-webkit-details-marker { display: none; }
