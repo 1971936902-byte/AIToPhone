@@ -103,6 +103,19 @@ test("Scheduled message API is server-side and runs under 5 seconds", () => {
   assert.match(server, /sendThreadMessage\(\{[\s\S]*event: "scheduled-message"/);
 });
 
+test("Remote Codex sessions default to writable git-friendly permissions", () => {
+  const codex = read("server/lib/codexAppServer.mjs");
+  const env = read(".env.example");
+  const readme = read("README.md");
+  assert.match(codex, /DEFAULT_APPROVAL_POLICY = "never"/);
+  assert.match(codex, /DEFAULT_SANDBOX = "danger-full-access"/);
+  assert.match(codex, /getThreadPermissions\(\)/);
+  assert.match(env, /CODEX_APPROVAL_POLICY=never/);
+  assert.match(env, /CODEX_SANDBOX=danger-full-access/);
+  assert.match(readme, /CODEX_APPROVAL_POLICY=never/);
+  assert.match(readme, /CODEX_SANDBOX=danger-full-access/);
+});
+
 await testConversationStoreContract();
 await testCodexEventNormalization();
 await testScheduledMessageStoreContract();

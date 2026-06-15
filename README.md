@@ -75,6 +75,15 @@ Windows PowerShell 下建议使用：
 CODEX_COMMAND=codex.cmd
 ```
 
+手机远程使用时建议打开写权限和免确认模式，否则 CodeX 可能只能读项目或等待电脑端确认，手机端会表现为无法写入代码、无法执行 git commit/push：
+
+```text
+CODEX_APPROVAL_POLICY=never
+CODEX_SANDBOX=danger-full-access
+```
+
+如果你只想允许项目目录内写文件，可以把 `CODEX_SANDBOX` 改回 `workspace-write`。权限配置只会在新建 CodeX 会话时生效；修改 `.env` 后请重启 AIToPhone 网关，并在手机端新建对话。
+
 ### 3. 配置项目白名单
 
 编辑 `projects.json`：

@@ -4,6 +4,8 @@ import WebSocket from "ws";
 
 const DEFAULT_CODEX_PORT = Number(process.env.CODEX_APP_SERVER_PORT || 4500);
 const DEFAULT_CODEX_URL = `ws://127.0.0.1:${DEFAULT_CODEX_PORT}`;
+const DEFAULT_APPROVAL_POLICY = "never";
+const DEFAULT_SANDBOX = "danger-full-access";
 
 export class CodexAppServer extends EventEmitter {
   constructor() {
@@ -46,7 +48,17 @@ export class CodexAppServer extends EventEmitter {
   }
 
   getStatus() {
-    return { ...this.status };
+    return {
+      ...this.status,
+      permissions: this.getThreadPermissions()
+    };
+  }
+
+  getThreadPermissions() {
+    return {
+      approvalPolicy: process.env.CODEX_APPROVAL_POLICY || DEFAULT_APPROVAL_POLICY,
+      sandbox: process.env.CODEX_SANDBOX || DEFAULT_SANDBOX
+    };
   }
 
   async request(method, params = {}) {
@@ -80,10 +92,11 @@ export class CodexAppServer extends EventEmitter {
   }
 
   async startThread({ cwd }) {
+    const permissions = this.getThreadPermissions();
     return this.request("thread/start", {
       cwd,
-      approvalPolicy: process.env.CODEX_APPROVAL_POLICY || "on-request",
-      sandbox: process.env.CODEX_SANDBOX || "workspace-write",
+      approvalPolicy: permissions.approvalPolicy,
+      sandbox: permissions.sandbox,
       serviceName: "aitophone-ios"
     });
   }
