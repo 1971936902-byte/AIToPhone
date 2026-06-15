@@ -84,15 +84,56 @@ els.gatewayInput.value = state.gatewayBaseUrl;
 renderEmpty("打开侧边栏，选择项目后开始对话");
 renderConnectionSummary();
 
-els.openDrawerBtn.addEventListener("click", openDrawer);
-els.closeDrawerBtn.addEventListener("click", closeDrawer);
-els.scrim.addEventListener("click", closeDrawer);
-els.openConnectionBtn.addEventListener("click", openConnectionDialog);
-els.closeConnectionBtn.addEventListener("click", () => els.connectionDialog.close());
-els.openHelpBtn.addEventListener("click", () => els.helpDialog.showModal());
-els.closeHelpBtn.addEventListener("click", () => els.helpDialog.close());
-els.closeNewDialogBtn.addEventListener("click", () => els.newDialog.close());
-els.saveGatewayBtn.addEventListener("click", () => {
+initializeApp();
+
+function initializeApp() {
+  bindNavigationEvents();
+  bindConnectionEvents();
+  bindProjectEvents();
+  bindComposerEvents();
+  loadConfig();
+  connectEvents();
+  startClientSyncLoop();
+
+  if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});
+}
+
+function bindNavigationEvents() {
+  els.openDrawerBtn.addEventListener("click", openDrawer);
+  els.closeDrawerBtn.addEventListener("click", closeDrawer);
+  els.scrim.addEventListener("click", closeDrawer);
+  els.openHelpBtn.addEventListener("click", () => els.helpDialog.showModal());
+  els.closeHelpBtn.addEventListener("click", () => els.helpDialog.close());
+  els.closeNewDialogBtn.addEventListener("click", () => els.newDialog.close());
+  els.newThreadBtn.addEventListener("click", () => {
+    els.newDialog.showModal();
+  });
+}
+
+function bindConnectionEvents() {
+  els.openConnectionBtn.addEventListener("click", openConnectionDialog);
+  els.closeConnectionBtn.addEventListener("click", () => els.connectionDialog.close());
+  els.saveGatewayBtn.addEventListener("click", saveGateway);
+  els.saveTokenBtn.addEventListener("click", saveToken);
+  els.clearLoginBtn.addEventListener("click", clearLogin);
+}
+
+function bindProjectEvents() {
+  els.createThreadBtn.addEventListener("click", createCurrentProjectThread);
+  els.createProjectBtn.addEventListener("click", createProjectFromDialog);
+}
+
+function bindComposerEvents() {
+  els.attachBtn.addEventListener("click", () => els.fileInput.click());
+  els.scheduleBtn.addEventListener("click", openScheduleDialog);
+  els.closeScheduleBtn.addEventListener("click", () => els.scheduleDialog.close());
+  els.createScheduleBtn.addEventListener("click", createScheduledMessage);
+  els.fileInput.addEventListener("change", handleFileInputChange);
+  els.composer.addEventListener("submit", sendComposerMessage);
+  els.messageInput.addEventListener("input", autosizeInput);
+}
+
+function saveGateway() {
   state.gatewayBaseUrl = normalizeGatewayUrl(els.gatewayInput.value);
   els.gatewayInput.value = state.gatewayBaseUrl;
   localStorage.setItem("aitophone_gateway", state.gatewayBaseUrl);
@@ -100,18 +141,18 @@ els.saveGatewayBtn.addEventListener("click", () => {
   connectEvents();
   startClientSyncLoop();
   loadConfig();
-});
+}
 
-els.saveTokenBtn.addEventListener("click", () => {
+function saveToken() {
   state.token = els.tokenInput.value.trim();
   localStorage.setItem("aitophone_token", state.token);
   renderConnectionSummary();
   connectEvents();
   startClientSyncLoop();
   loadConfig();
-});
+}
 
-els.clearLoginBtn.addEventListener("click", () => {
+function clearLogin() {
   state.token = "";
   state.gatewayBaseUrl = "";
   els.tokenInput.value = "";
@@ -123,13 +164,9 @@ els.clearLoginBtn.addEventListener("click", () => {
   stopClientSyncLoop();
   if (state.ws) state.ws.close();
   els.statusText.textContent = "请重新输入访问口令";
-});
+}
 
-els.newThreadBtn.addEventListener("click", () => {
-  els.newDialog.showModal();
-});
-
-els.createThreadBtn.addEventListener("click", async () => {
+async function createCurrentProjectThread() {
   const projectId = selectedProjectId();
   if (!projectId) return;
   try {
@@ -139,9 +176,9 @@ els.createThreadBtn.addEventListener("click", async () => {
   } catch (err) {
     addSystemMessage(err.message);
   }
-});
+}
 
-els.createProjectBtn.addEventListener("click", async () => {
+async function createProjectFromDialog() {
   const name = els.newProjectName.value.trim();
   const cwd = els.newProjectPath.value.trim();
   if (!name && !cwd) {
@@ -167,13 +204,9 @@ els.createProjectBtn.addEventListener("click", async () => {
   } finally {
     setBusy(false);
   }
-});
+}
 
-els.attachBtn.addEventListener("click", () => els.fileInput.click());
-els.scheduleBtn.addEventListener("click", openScheduleDialog);
-els.closeScheduleBtn.addEventListener("click", () => els.scheduleDialog.close());
-els.createScheduleBtn.addEventListener("click", createScheduledMessage);
-els.fileInput.addEventListener("change", async () => {
+async function handleFileInputChange() {
   const files = [...els.fileInput.files];
   els.fileInput.value = "";
   for (const file of files) {
@@ -183,9 +216,9 @@ els.fileInput.addEventListener("change", async () => {
       addSystemMessage(`附件上传失败：${err.message}`);
     }
   }
-});
+}
 
-els.composer.addEventListener("submit", async (event) => {
+async function sendComposerMessage(event) {
   event.preventDefault();
   const text = els.messageInput.value.trim();
   if (!text && state.attachments.length === 0) return;
@@ -222,15 +255,7 @@ els.composer.addEventListener("submit", async (event) => {
   } finally {
     setBusy(false);
   }
-});
-
-els.messageInput.addEventListener("input", autosizeInput);
-
-loadConfig();
-connectEvents();
-startClientSyncLoop();
-
-if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});
+}
 
 async function loadConfig() {
   if (!state.token) {

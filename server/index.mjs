@@ -1,13 +1,15 @@
 import "dotenv/config";
-import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer } from "ws";
+import { AccountService } from "./lib/accountService.mjs";
 import { CodexAppServer } from "./lib/codexAppServer.mjs";
 import { ConversationStore, normalizeCodexEvent } from "./lib/conversationStore.mjs";
+import { readJson, sendEmpty, sendJson, serveStatic } from "./lib/httpUtils.mjs";
 import { createProject, getProject, loadProjects, publicProjects, refreshProjects, removeProject } from "./lib/projects.mjs";
 import { ScheduledMessageStore } from "./lib/scheduledMessages.mjs";
+import { buildMessageText, UploadService } from "./lib/uploads.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.resolve(__dirname, "..", "public");
@@ -23,6 +25,8 @@ const codex = new CodexAppServer();
 const clients = new Set();
 const store = new ConversationStore(projects);
 const schedules = new ScheduledMessageStore();
+const uploads = new UploadService(uploadDir);
+const accounts = new AccountService({ codex });
 let syncSeq = 0;
 let syncTimer = null;
 let schedulerTimer = null;
@@ -30,12 +34,6 @@ let schedulerRunning = false;
 let syncRunning = false;
 let accountSyncRunning = false;
 let lastAccountSyncAt = 0;
-const accountCache = {
-  account: null,
-  limits: null,
-  usage: null,
-  updatedAt: null
-};
 
 if (authToken === "change-this-long-random-token") {
   console.warn("Warning: AUTH_TOKEN is still using the example value. Change it before remote use.");
@@ -55,7 +53,7 @@ const server = http.createServer(async (req, res) => {
       return await handleApi(req, res, url);
     }
 
-    return serveStatic(res, url.pathname);
+    return serveStatic(res, url.pathname, publicDir);
   } catch (err) {
     console.error(err);
     return sendJson(res, 500, { error: err.message || "Server error" });
@@ -117,7 +115,7 @@ async function handleApi(req, res, url) {
       codex: codex.getStatus(),
       projects: publicProjects(projects),
       conversations: store.listConversations(),
-      account: buildAccountSnapshotFromCache(),
+      account: accounts.fromCache(),
       scheduledMessages: schedules.list()
     });
   }
@@ -172,17 +170,17 @@ async function handleApi(req, res, url) {
   }
 
   if (req.method === "GET" && url.pathname === "/api/account") {
-    return sendJson(res, 200, await readAccountSnapshot());
+    return sendJson(res, 200, await accounts.readSnapshot());
   }
 
   if (req.method === "POST" && url.pathname === "/api/uploads") {
     const body = await readJson(req, 25 * 1024 * 1024);
-    const upload = saveUpload(body);
+    const upload = uploads.save(body);
     return sendJson(res, 200, { upload });
   }
 
   if (req.method === "GET" && url.pathname === "/api/files") {
-    return serveFileDownload(req, res, url);
+    return uploads.serveDownload(res, url.searchParams.get("path"), projects.map((project) => project.cwd));
   }
 
   if (req.method === "GET" && url.pathname === "/api/scheduled-messages") {
@@ -198,7 +196,7 @@ async function handleApi(req, res, url) {
     }
 
     const text = String(body.text || "").trim();
-    const attachments = Array.isArray(body.attachments) ? body.attachments.map(resolveAttachment).filter(Boolean) : [];
+    const attachments = uploads.resolveMany(body.attachments);
     if (!text && attachments.length === 0) {
       return sendJson(res, 400, { error: "Message text is required" });
     }
@@ -293,7 +291,7 @@ async function handleApi(req, res, url) {
     const threadId = decodeURIComponent(messageMatch[1]);
     const body = await readJson(req);
     const text = String(body.text || "").trim();
-    const attachments = Array.isArray(body.attachments) ? body.attachments.map(resolveAttachment).filter(Boolean) : [];
+    const attachments = uploads.resolveMany(body.attachments);
     if (!text && attachments.length === 0) {
       return sendJson(res, 400, { error: "Message text is required" });
     }
@@ -367,84 +365,6 @@ async function unsubscribeThreads(threadIds) {
   return results;
 }
 
-function readJson(req, maxBytes = 1024 * 1024) {
-  return new Promise((resolve, reject) => {
-    let data = "";
-    req.on("data", (chunk) => {
-      data += chunk;
-      if (data.length > maxBytes) {
-        reject(new Error("Request body too large"));
-        req.destroy();
-      }
-    });
-    req.on("end", () => {
-      if (!data) {
-        resolve({});
-        return;
-      }
-      try {
-        resolve(JSON.parse(data));
-      } catch {
-        reject(new Error("Invalid JSON"));
-      }
-    });
-    req.on("error", reject);
-  });
-}
-
-function saveUpload(body) {
-  const name = path.basename(String(body.name || "upload.bin")).replace(/[^\w.\-()\u4e00-\u9fff ]/g, "_");
-  const mime = String(body.type || "application/octet-stream");
-  const dataUrl = String(body.dataUrl || "");
-  const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
-  if (!match) {
-    throw new Error("Invalid upload payload");
-  }
-
-  const buffer = Buffer.from(match[2], "base64");
-  const id = `${Date.now()}_${Math.random().toString(36).slice(2)}`;
-  const dir = path.join(uploadDir, id);
-  fs.mkdirSync(dir, { recursive: true });
-  const filePath = path.join(dir, name);
-  fs.writeFileSync(filePath, buffer);
-  return {
-    id,
-    name,
-    mime,
-    size: buffer.length,
-    kind: mime.startsWith("image/") ? "image" : "file",
-    path: filePath,
-    url: `/api/files?path=${encodeURIComponent(filePath)}`
-  };
-}
-
-function resolveAttachment(attachment) {
-  const filePath = path.resolve(String(attachment.path || ""));
-  if (!filePath.startsWith(uploadDir) || !fs.existsSync(filePath)) {
-    return null;
-  }
-  return {
-    id: String(attachment.id || ""),
-    name: path.basename(filePath),
-    mime: String(attachment.mime || "application/octet-stream"),
-    size: Number(attachment.size || 0),
-    kind: String(attachment.kind || "").startsWith("image") ? "image" : "file",
-    path: filePath,
-    url: `/api/files?path=${encodeURIComponent(filePath)}`
-  };
-}
-
-function buildMessageText(text, attachments) {
-  if (attachments.length === 0) {
-    return text;
-  }
-  const lines = [text || "请查看我上传的附件。", "", "附件："];
-  for (const attachment of attachments) {
-    lines.push(`- ${attachment.name}: ${attachment.path}`);
-  }
-  return lines.join("\n");
-}
-
 function parseScheduleTime(body) {
   const now = Date.now();
   if (body.sendAt) {
@@ -471,84 +391,6 @@ async function sendThreadMessage({ threadId, text, attachments, event }) {
   broadcastSync(event);
   const result = await codex.sendMessage({ threadId, text: messageText, attachments });
   return { message, result };
-}
-
-function serveFileDownload(req, res, url) {
-  const filePath = path.resolve(url.searchParams.get("path") || "");
-  const allowedRoots = [uploadDir, ...projects.map((project) => path.resolve(project.cwd))];
-  if (!allowedRoots.some((root) => filePath === root || filePath.startsWith(`${root}${path.sep}`))) {
-    res.writeHead(403);
-    res.end("Forbidden");
-    return;
-  }
-  if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
-    res.writeHead(404);
-    res.end("Not found");
-    return;
-  }
-  res.writeHead(200, {
-    "content-type": contentType(filePath),
-    "content-disposition": `inline; filename="${encodeURIComponent(path.basename(filePath))}"`
-  });
-  fs.createReadStream(filePath).pipe(res);
-}
-
-function settledValue(result) {
-  return result.status === "fulfilled" ? result.value : null;
-}
-
-async function readAccountSnapshot() {
-  const [account, limits, usage] = await Promise.allSettled([
-    withTimeout(codex.readAccount(), 6000, "account/read timed out"),
-    withTimeout(codex.readRateLimits(), 6000, "account/rateLimits/read timed out"),
-    withTimeout(codex.readUsage(), 6000, "account/usage/read timed out")
-  ]);
-
-  updateAccountCache("account", account);
-  updateAccountCache("limits", limits);
-  updateAccountCache("usage", usage);
-
-  const errors = settledErrors({ account, limits, usage });
-  const accountValue = settledValue(account);
-  return {
-    account: hasAccountDetails(accountValue) ? accountValue : accountCache.account || readLocalAccountHint() || accountValue,
-    limits: settledValue(limits) || accountCache.limits,
-    usage: settledValue(usage) || accountCache.usage,
-    errors,
-    stale: Object.keys(errors).length > 0,
-    updatedAt: accountCache.updatedAt || new Date().toISOString()
-  };
-}
-
-function updateAccountCache(key, result) {
-  if (result.status === "fulfilled" && result.value) {
-    if (key === "account" && !hasAccountDetails(result.value)) {
-      return;
-    }
-    accountCache[key] = result.value;
-    accountCache.updatedAt = new Date().toISOString();
-  }
-}
-
-function hasAccountDetails(value) {
-  return Boolean(value?.account);
-}
-
-function settledErrors(results) {
-  const errors = {};
-  for (const [key, result] of Object.entries(results)) {
-    if (result.status === "rejected") {
-      errors[key] = result.reason?.message || String(result.reason);
-    }
-  }
-  return errors;
-}
-
-function withTimeout(promise, ms, message) {
-  return Promise.race([
-    promise,
-    new Promise((_, reject) => setTimeout(() => reject(new Error(message)), ms))
-  ]);
 }
 
 function startSyncLoop() {
@@ -638,7 +480,7 @@ async function maybeRefreshAccount() {
   }
   accountSyncRunning = true;
   try {
-    await readAccountSnapshot();
+    await accounts.readSnapshot();
     lastAccountSyncAt = Date.now();
     return true;
   } catch {
@@ -654,20 +496,9 @@ function buildSyncPayload(extra = {}) {
     codex: codex.getStatus(),
     projects: publicProjects(projects),
     conversations: store.listConversations(),
-    account: buildAccountSnapshotFromCache(),
+    account: accounts.fromCache(),
     scheduledMessages: schedules.list(),
     ...extra
-  };
-}
-
-function buildAccountSnapshotFromCache() {
-  return {
-    account: accountCache.account || readLocalAccountHint(),
-    limits: accountCache.limits,
-    usage: accountCache.usage,
-    errors: {},
-    stale: false,
-    updatedAt: accountCache.updatedAt
   };
 }
 
@@ -696,76 +527,6 @@ function sendFrame(ws, type, event, payload = {}) {
   }
 }
 
-function readLocalAccountHint() {
-  try {
-    const authPath = path.join(process.env.USERPROFILE || "", ".codex", "auth.json");
-    if (!fs.existsSync(authPath)) {
-      return null;
-    }
-    const data = JSON.parse(fs.readFileSync(authPath, "utf8"));
-    const accountId = data?.tokens?.account_id || data?.account_id || data?.chatgpt_account_id;
-    if (!accountId) {
-      return null;
-    }
-    return {
-      account: {
-        type: "local",
-        accountId
-      },
-      requiresOpenaiAuth: false,
-      source: "local-auth-hint"
-    };
-  } catch {
-    return null;
-  }
-}
-
-function sendJson(res, status, payload) {
-  res.writeHead(status, {
-    "content-type": "application/json; charset=utf-8",
-    "cache-control": "no-store",
-    ...corsHeaders()
-  });
-  res.end(JSON.stringify(payload));
-}
-
-function sendEmpty(res, status) {
-  res.writeHead(status, corsHeaders());
-  res.end();
-}
-
-function serveStatic(res, pathname) {
-  const safePath = pathname === "/" ? "/index.html" : pathname;
-  const fullPath = path.normalize(path.join(publicDir, safePath));
-  if (!fullPath.startsWith(publicDir)) {
-    res.writeHead(403);
-    res.end("Forbidden");
-    return;
-  }
-
-  fs.readFile(fullPath, (err, data) => {
-    if (err) {
-      res.writeHead(404);
-      res.end("Not found");
-      return;
-    }
-    res.writeHead(200, {
-      "content-type": contentType(fullPath),
-      "cache-control": "no-store",
-      ...corsHeaders()
-    });
-    res.end(data);
-  });
-}
-
-function corsHeaders() {
-  return {
-    "access-control-allow-origin": "*",
-    "access-control-allow-methods": "GET,POST,OPTIONS",
-    "access-control-allow-headers": "authorization,content-type"
-  };
-}
-
 function broadcast(payload) {
   const data = JSON.stringify(payload);
   for (const client of clients) {
@@ -773,19 +534,4 @@ function broadcast(payload) {
       client.send(data);
     }
   }
-}
-
-function contentType(file) {
-  if (file.endsWith(".html")) return "text/html; charset=utf-8";
-  if (file.endsWith(".css")) return "text/css; charset=utf-8";
-  if (file.endsWith(".js")) return "text/javascript; charset=utf-8";
-  if (file.endsWith(".json") || file.endsWith(".webmanifest")) return "application/json; charset=utf-8";
-  if (file.endsWith(".svg")) return "image/svg+xml";
-  if (file.endsWith(".png")) return "image/png";
-  if (file.endsWith(".jpg") || file.endsWith(".jpeg")) return "image/jpeg";
-  if (file.endsWith(".gif")) return "image/gif";
-  if (file.endsWith(".webp")) return "image/webp";
-  if (file.endsWith(".txt") || file.endsWith(".md")) return "text/plain; charset=utf-8";
-  if (file.endsWith(".pdf")) return "application/pdf";
-  return "application/octet-stream";
 }

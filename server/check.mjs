@@ -4,8 +4,12 @@ import path from "node:path";
 const root = process.cwd();
 const required = [
   "server/index.mjs",
+  "server/lib/accountService.mjs",
   "server/lib/codexAppServer.mjs",
+  "server/lib/httpUtils.mjs",
   "server/lib/projects.mjs",
+  "server/lib/scheduledMessages.mjs",
+  "server/lib/uploads.mjs",
   "public/index.html",
   "public/app.js",
   "public/sw.js",

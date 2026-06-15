@@ -116,6 +116,20 @@ test("Remote Codex sessions default to writable git-friendly permissions", () =>
   assert.match(readme, /CODEX_SANDBOX=danger-full-access/);
 });
 
+test("Server entry delegates infrastructure concerns to modules", () => {
+  const server = read("server/index.mjs");
+  const check = read("server/check.mjs");
+  assert.match(server, /from "\.\/lib\/httpUtils\.mjs"/);
+  assert.match(server, /from "\.\/lib\/uploads\.mjs"/);
+  assert.match(server, /from "\.\/lib\/accountService\.mjs"/);
+  assert.doesNotMatch(server, /function saveUpload/);
+  assert.doesNotMatch(server, /function readJson/);
+  assert.doesNotMatch(server, /function serveStatic/);
+  assert.match(check, /server\/lib\/httpUtils\.mjs/);
+  assert.match(check, /server\/lib\/uploads\.mjs/);
+  assert.match(check, /server\/lib\/accountService\.mjs/);
+});
+
 await testConversationStoreContract();
 await testCodexEventNormalization();
 await testScheduledMessageStoreContract();
