@@ -133,6 +133,8 @@ test("Server entry delegates infrastructure concerns to modules", () => {
 await testConversationStoreContract();
 await testCodexEventNormalization();
 await testScheduledMessageStoreContract();
+await testUploadServiceContract();
+await testAccountServiceContract();
 
 for (const result of results) {
   if (result.ok) {
@@ -305,6 +307,67 @@ async function testScheduledMessageStoreContract() {
     });
   } finally {
     process.chdir(originalCwd);
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
+async function testUploadServiceContract() {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "aitophone-upload-test-"));
+  try {
+    const { UploadService, buildMessageText } = await import(`file:///${path.join(repoRoot, "server/lib/uploads.mjs").replace(/\\/g, "/")}?u=${Date.now()}`);
+    const service = new UploadService(path.join(tmp, "uploads"));
+    const upload = service.save({
+      name: "smoke?.txt",
+      type: "text/plain",
+      dataUrl: `data:text/plain;base64,${Buffer.from("hello upload").toString("base64")}`
+    });
+
+    test("Upload service sanitizes and resolves stored attachments", () => {
+      assert.equal(upload.kind, "file");
+      assert.equal(fs.readFileSync(upload.path, "utf8"), "hello upload");
+      assert.equal(service.resolve(upload).path, upload.path);
+      assert.equal(service.resolve({ path: path.join(tmp, "outside.txt") }), null);
+    });
+
+    test("Upload message text includes attachment names and paths", () => {
+      const text = buildMessageText("see file", [upload]);
+      assert.match(text, /see file/);
+      assert.match(text, /附件/);
+      assert.match(text, new RegExp(upload.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    });
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
+async function testAccountServiceContract() {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "aitophone-account-test-"));
+  try {
+    const { AccountService } = await import(`file:///${path.join(repoRoot, "server/lib/accountService.mjs").replace(/\\/g, "/")}?a=${Date.now()}`);
+    const authDir = path.join(tmp, ".codex");
+    fs.mkdirSync(authDir, { recursive: true });
+    fs.writeFileSync(path.join(authDir, "auth.json"), JSON.stringify({ account_id: "acct_local" }), "utf8");
+    const service = new AccountService({
+      homeDir: tmp,
+      codex: {
+        readAccount: async () => ({ account: { type: "chatgpt", email: "test@example.com" } }),
+        readRateLimits: async () => ({ rateLimits: { primary: { usedPercent: 10 } } }),
+        readUsage: async () => ({ summary: { lifetimeTokens: 42 } })
+      }
+    });
+
+    const snapshot = await service.readSnapshot();
+    test("Account service reads snapshots and exposes cached values", () => {
+      assert.equal(snapshot.account.account.email, "test@example.com");
+      assert.equal(snapshot.limits.rateLimits.primary.usedPercent, 10);
+      assert.equal(service.fromCache().usage.summary.lifetimeTokens, 42);
+    });
+
+    test("Account service falls back to local account hint", () => {
+      const fallback = new AccountService({ homeDir: tmp, codex: {} });
+      assert.equal(fallback.fromCache().account.account.accountId, "acct_local");
+    });
+  } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 }
