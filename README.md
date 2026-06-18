@@ -48,6 +48,16 @@ AIToPhone 不直接把任意文件系统暴露给手机。手机只能选择 `pr
 
 ## 快速开始
 
+### Windows 桌面控制面板
+
+推荐在 Windows 上直接双击：
+
+```text
+AIToPhone-Control-Panel.cmd
+```
+
+这个小工具可以在图形界面里保存 `.env` 配置、一键连接本地 CodeX、检测 WebSocket 状态，并复制手机访问链接。完整部署与排障说明见 [DEPLOYMENT.md](./DEPLOYMENT.md)。
+
 ### 1. 安装依赖
 
 ```powershell

@@ -138,6 +138,21 @@ test("Server entry delegates infrastructure concerns to modules", () => {
   assert.match(check, /server\/lib\/accountService\.mjs/);
 });
 
+test("Deployment docs and Windows control panel are present", () => {
+  const readme = read("README.md");
+  const deployment = read("DEPLOYMENT.md");
+  const launcher = read("AIToPhone-Control-Panel.cmd");
+  const panel = read("scripts/aitophone-control-panel.ps1");
+  assert.match(readme, /AIToPhone-Control-Panel\.cmd/);
+  assert.match(readme, /DEPLOYMENT\.md/);
+  assert.match(deployment, /CodeX WebSocket/);
+  assert.match(deployment, /一键连接/);
+  assert.match(launcher, /aitophone-control-panel\.ps1/);
+  assert.match(panel, /System\.Windows\.Forms/);
+  assert.match(panel, /Restart-AIToPhoneGateway/);
+  assert.match(panel, /Trigger-CodexConnection/);
+});
+
 await testConversationStoreContract();
 await testCodexEventNormalization();
 await testScheduledMessageStoreContract();
