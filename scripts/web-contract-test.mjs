@@ -116,6 +116,14 @@ test("Remote Codex sessions default to writable git-friendly permissions", () =>
   assert.match(readme, /CODEX_SANDBOX=danger-full-access/);
 });
 
+test("Codex app-server launcher supports Windows command shims", () => {
+  const codex = read("server/lib/codexAppServer.mjs");
+  assert.match(codex, /spawnOptionsForCommand\(command\)/);
+  assert.match(codex, /process\.platform === "win32"/);
+  assert.match(codex, /\\\.\(cmd\|bat\)\$/);
+  assert.match(codex, /shell: true/);
+});
+
 test("Server entry delegates infrastructure concerns to modules", () => {
   const server = read("server/index.mjs");
   const check = read("server/check.mjs");

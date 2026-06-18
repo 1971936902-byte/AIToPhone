@@ -182,7 +182,8 @@ export class CodexAppServer extends EventEmitter {
     this.proc = spawn(command, args, {
       cwd: process.cwd(),
       stdio: ["ignore", "pipe", "pipe"],
-      windowsHide: true
+      windowsHide: true,
+      ...spawnOptionsForCommand(command)
     });
     this.status.launched = true;
 
@@ -302,4 +303,11 @@ export class CodexAppServer extends EventEmitter {
 
 function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function spawnOptionsForCommand(command) {
+  if (process.platform === "win32" && /\.(cmd|bat)$/i.test(command)) {
+    return { shell: true };
+  }
+  return {};
 }
